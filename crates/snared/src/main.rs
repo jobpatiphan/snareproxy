@@ -2,6 +2,7 @@
 
 mod api;
 mod paths;
+mod repeater;
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -137,9 +138,11 @@ async fn cmd_run(paths: &Paths, proxy_addr: SocketAddr, api_addr: SocketAddr) ->
     let store_dyn: Arc<dyn FlowStore> = store.clone();
     let (events, _rx) = tokio::sync::broadcast::channel(1024);
 
-    // REST API
+    // REST API — shares the live event bus with the proxy engine so the SSE
+    // stream and the AI-activity sink both feed the same dashboard.
     let app = api::router(api::AppState {
         store: store_dyn.clone(),
+        events: events.clone(),
     });
     let listener = tokio::net::TcpListener::bind(api_addr)
         .await
@@ -160,8 +163,9 @@ async fn cmd_run(paths: &Paths, proxy_addr: SocketAddr, api_addr: SocketAddr) ->
         ca_key_pem,
     };
     println!("Snare running.");
-    println!("  proxy : http://{proxy_addr}  (point your browser here)");
-    println!("  api   : http://{api_addr}");
+    println!("  proxy     : http://{proxy_addr}  (point your browser/agent here)");
+    println!("  api       : http://{api_addr}");
+    println!("  dashboard : http://{api_addr}/  ← open this to watch traffic live");
     println!("  press Ctrl-C to stop");
 
     snare_engine::run(cfg, store_dyn, events, async {

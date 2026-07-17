@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>🪤 Snare — Live</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --panel2:#0d1117; --line:#21262d;
+    --fg:#e6edf3; --dim:#8b949e; --accent:#d29922; --accent2:#f0b429;
+    --ok:#3fb950; --warn:#d29922; --err:#f85149; --info:#58a6ff; --purple:#bc8cff;
+    --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+    display:flex;flex-direction:column;height:100vh;overflow:hidden;font-size:13px}
+
+  header{display:flex;align-items:center;gap:14px;padding:8px 14px;background:var(--panel);
+    border-bottom:1px solid var(--line);flex:none}
+  header .logo{font-weight:700;font-size:15px;letter-spacing:.3px}
+  header .logo small{color:var(--dim);font-weight:400}
+  .dot{width:9px;height:9px;border-radius:50%;background:var(--err);box-shadow:0 0 0 0 rgba(63,185,80,.6)}
+  .dot.on{background:var(--ok);animation:pulse 2s infinite}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(63,185,80,.5)}70%{box-shadow:0 0 0 7px rgba(63,185,80,0)}100%{box-shadow:0 0 0 0 rgba(63,185,80,0)}}
+  header .grow{flex:1}
+  header input[type=text]{background:var(--panel2);border:1px solid var(--line);color:var(--fg);
+    padding:5px 9px;border-radius:6px;width:240px;font-family:var(--mono);font-size:12px}
+  header button{background:var(--panel2);border:1px solid var(--line);color:var(--fg);
+    padding:5px 10px;border-radius:6px;cursor:pointer;font-size:12px}
+  header button:hover{border-color:var(--dim)}
+  header button.active{background:var(--accent);color:#000;border-color:var(--accent);font-weight:600}
+  .stat{color:var(--dim);font-family:var(--mono);font-size:12px}
+  .stat b{color:var(--fg)}
+
+  /* AI activity banner */
+  #ai{display:none;align-items:center;gap:12px;padding:9px 14px;background:linear-gradient(90deg,#2d1b4e,#161b22);
+    border-bottom:1px solid var(--purple);flex:none;font-size:13px}
+  #ai.show{display:flex}
+  #ai.flash{animation:aiflash .8s ease}
+  @keyframes aiflash{0%{background:linear-gradient(90deg,#4b2d7a,#2d1b4e)}100%{background:linear-gradient(90deg,#2d1b4e,#161b22)}}
+  #ai .bot{font-size:20px;animation:bob 1.4s ease-in-out infinite}
+  @keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}
+  #ai .who{color:var(--purple);font-weight:700}
+  #ai .what{color:var(--fg)}
+  #ai .detail{color:var(--dim)}
+  #ai .ago{margin-left:auto;color:var(--dim);font-family:var(--mono);font-size:11px}
+
+  main{flex:1;display:flex;min-height:0}
+  .col-flows{flex:1;min-width:0;display:flex;flex-direction:column;border-right:1px solid var(--line)}
+  .col-detail{width:44%;min-width:340px;display:flex;flex-direction:column;background:var(--panel2)}
+
+  .scroll{overflow:auto;flex:1}
+  table{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:12px}
+  thead th{position:sticky;top:0;background:var(--panel);color:var(--dim);text-align:left;
+    padding:6px 8px;border-bottom:1px solid var(--line);font-weight:600;z-index:1;white-space:nowrap}
+  tbody td{padding:5px 8px;border-bottom:1px solid var(--line);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  tbody tr{cursor:pointer}
+  tbody tr:hover{background:#1c2230}
+  tbody tr.sel{background:#243049}
+  tr.fresh{animation:fresh 1.4s ease}
+  @keyframes fresh{0%{background:#3a2f10}100%{background:transparent}}
+  .m{font-weight:700}
+  .m-GET{color:var(--ok)} .m-POST{color:var(--accent2)} .m-PUT{color:var(--info)}
+  .m-DELETE{color:var(--err)} .m-PATCH{color:var(--purple)} .m-HEAD,.m-OPTIONS{color:var(--dim)}
+  .s2{color:var(--ok)} .s3{color:var(--info)} .s4{color:var(--warn)} .s5{color:var(--err)} .s0{color:var(--dim)}
+  .url{color:var(--fg)} .host{color:var(--dim)}
+  .col-num{width:52px;color:var(--dim)} .col-time{width:74px;color:var(--dim)}
+  .col-sz,.col-ms{width:64px;text-align:right;color:var(--dim)}
+
+  .detail-head{padding:8px 12px;border-bottom:1px solid var(--line);background:var(--panel);
+    font-family:var(--mono);font-size:12px;display:flex;gap:8px;align-items:center;flex:none}
+  .detail-head button{background:var(--accent);color:#000;border:0;padding:3px 10px;border-radius:6px;
+    cursor:pointer;font-weight:700;font-size:12px}
+  .detail-head button:hover{background:var(--accent2)} .detail-head button:disabled{opacity:.5;cursor:default}
+  .rep{color:var(--accent2);font-weight:700;margin-right:3px}
+  .tabs{display:flex;gap:4px;padding:6px 10px;border-bottom:1px solid var(--line);flex:none}
+  .tabs button{background:transparent;border:1px solid var(--line);color:var(--dim);
+    padding:3px 12px;border-radius:6px;cursor:pointer;font-size:12px}
+  .tabs button.active{color:var(--fg);border-color:var(--accent);background:#1c2230}
+  pre.body{margin:0;padding:10px 12px;font-family:var(--mono);font-size:12px;white-space:pre-wrap;
+    word-break:break-word;overflow:auto;flex:1;color:#c9d1d9;line-height:1.5}
+  .kv{color:var(--dim)} .kv b{color:var(--info);font-weight:400}
+  .empty{color:var(--dim);padding:26px;text-align:center;font-style:italic}
+
+  /* AI log drawer */
+  #ailog{position:fixed;right:0;bottom:0;width:360px;max-height:44%;background:var(--panel);
+    border:1px solid var(--purple);border-right:0;border-bottom:0;border-top-left-radius:10px;
+    display:none;flex-direction:column;box-shadow:0 -6px 30px rgba(0,0,0,.5);z-index:5}
+  #ailog.show{display:flex}
+  #ailog .h{padding:7px 12px;border-bottom:1px solid var(--line);color:var(--purple);font-weight:700;
+    display:flex;align-items:center;gap:8px}
+  #ailog .h .grow{flex:1}
+  #ailog .h span{cursor:pointer;color:var(--dim)}
+  #ailog .list{overflow:auto;padding:4px 0}
+  #ailog .item{padding:5px 12px;border-bottom:1px solid var(--line);font-family:var(--mono);font-size:11px}
+  #ailog .item .t{color:var(--purple)} #ailog .item .d{color:var(--dim)} #ailog .item .ts{color:#586069}
+</style>
+</head>
+<body>
+<header>
+  <span class="dot" id="dot"></span>
+  <span class="logo">🪤 Snare <small>· Live</small></span>
+  <span class="stat"><b id="count">0</b> flows</span>
+  <span class="grow"></span>
+  <input type="text" id="filter" placeholder="filter host / path / method…" autocomplete="off">
+  <button id="btnNotify" title="Desktop popups when the AI acts">🔔 Popups: off</button>
+  <button id="btnAuto" class="active" title="Auto-scroll to newest">⤓ Auto</button>
+  <button id="btnClear" title="Clear the view (does not delete stored flows)">Clear</button>
+</header>
+
+<div id="ai">
+  <span class="bot">🤖</span>
+  <span><span class="who" id="aiWho">AI</span> <span class="what" id="aiWhat"></span> <span class="detail" id="aiDetail"></span></span>
+  <span class="ago" id="aiAgo"></span>
+</div>
+
+<main>
+  <div class="col-flows">
+    <div class="scroll">
+      <table>
+        <thead><tr>
+          <th class="col-num">#</th><th>M</th><th>St</th><th>Host / Path</th>
+          <th>Type</th><th class="col-sz">Size</th><th class="col-ms">ms</th><th class="col-time">Time</th>
+        </tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+  </div>
+  <div class="col-detail">
+    <div class="detail-head" id="dHead"><span class="empty" style="padding:0">select a flow →</span></div>
+    <div class="tabs" id="dTabs" style="display:none">
+      <button data-t="req" class="active">Request</button>
+      <button data-t="res">Response</button>
+    </div>
+    <pre class="body" id="dBody"></pre>
+  </div>
+</main>
+
+<div id="ailog">
+  <div class="h"><span>🤖</span> AI activity <span class="grow"></span><span id="ailogClose">✕</span></div>
+  <div class="list" id="ailogList"></div>
+</div>
+
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const rows = $('rows'), countEl = $('count'), dot = $('dot');
+  const state = { flows: new Map(), order: [], sel: null, detail: null, tab: 'req',
+                  auto: true, notify: false, filter: '' };
+
+  // ---------- helpers ----------
+  const esc = s => (s==null?'':String(s)).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+  const hhmmss = ts => { const d=new Date(ts); const p=n=>String(n).padStart(2,'0');
+    return p(d.getHours())+':'+p(d.getMinutes())+':'+p(d.getSeconds()); };
+  const sizeFmt = n => n==null?'':(n<1024?n+'B':n<1048576?(n/1024).toFixed(1)+'K':(n/1048576).toFixed(1)+'M');
+  const b64dec = b64 => { try{ const bin=atob(b64||''); const u=new Uint8Array(bin.length);
+    for(let i=0;i<bin.length;i++)u[i]=bin.charCodeAt(i);
+    try{return new TextDecoder('utf-8',{fatal:false}).decode(u);}catch(e){return bin;} }catch(e){return '';} };
+
+  // ---------- flow rendering ----------
+  function matches(f){ if(!state.filter) return true;
+    return (f.method+' '+f.host+f.path+' '+(f.status||'')).toLowerCase().includes(state.filter); }
+
+  function rowHtml(f){
+    const sc = f.status ? 's'+String(f.status)[0] : 's0';
+    const type = (f.mime||'').replace('application/','').replace('text/','');
+    const rep = f.source==='repeater' ? '<span class="rep" title="repeater">↻</span>' : '';
+    return `<td class="col-num">${rep}${f.id}</td>`+
+      `<td class="m m-${esc(f.method)}">${esc(f.method)}</td>`+
+      `<td class="${sc}">${f.status||'·'}</td>`+
+      `<td><span class="host">${esc(f.host)}</span><span class="url">${esc(f.path)}</span></td>`+
+      `<td class="host">${esc(type)}</td>`+
+      `<td class="col-sz">${sizeFmt(f.resp_size)}</td>`+
+      `<td class="col-ms">${f.duration_ms??''}</td>`+
+      `<td class="col-time">${hhmmss(f.ts)}</td>`;
+  }
+
+  function upsert(f, fresh){
+    let tr = state.flows.get(f.id)?.el;
+    if(!tr){
+      tr = document.createElement('tr');
+      tr.dataset.id = f.id;
+      tr.onclick = () => select(f.id);
+      state.order.push(f.id);
+      if(state.auto) rows.prepend(tr); else rows.appendChild(tr);
+    }
+    tr.innerHTML = rowHtml(f);
+    tr.style.display = matches(f) ? '' : 'none';
+    if(state.sel === f.id) tr.classList.add('sel');
+    if(fresh){ tr.classList.remove('fresh'); void tr.offsetWidth; tr.classList.add('fresh'); }
+    state.flows.set(f.id, { f, el: tr });
+    countEl.textContent = state.flows.size;
+  }
+
+  async function select(id){
+    state.sel = id;
+    document.querySelectorAll('tr.sel').forEach(t=>t.classList.remove('sel'));
+    const rec = state.flows.get(id); if(rec) rec.el.classList.add('sel');
+    $('dTabs').style.display = 'flex';
+    $('dHead').innerHTML = '<span class="kv">loading…</span>';
+    try{
+      const r = await fetch('/api/v1/flows/'+id); state.detail = await r.json();
+      const f = state.detail;
+      const url = f.request.url ? f.request.url : (f.request.scheme+'://'+f.request.host+f.request.path);
+      $('dHead').innerHTML = `<button id="resend" title="Resend this request (Repeater)">↻ Resend</button>`+
+        `<span class="m m-${esc(f.request.method)}">${esc(f.request.method)}</span> `+
+        `<span class="url">${esc(url)}</span>`;
+      $('resend').onclick = () => resend(id);
+      renderDetail();
+    }catch(e){ $('dHead').innerHTML='<span class="s5">failed to load</span>'; }
+  }
+
+  async function resend(id){
+    const btn=$('resend'); if(btn){ btn.disabled=true; btn.textContent='↻ sending…'; }
+    try{
+      const r = await fetch('/api/v1/repeater/from/'+id, {method:'POST'});
+      const f = await r.json();
+      if(f && f.id){ select(f.id); } // the new repeater flow also streams in via SSE
+    }catch(e){}
+    if(btn){ btn.disabled=false; btn.textContent='↻ Resend'; }
+  }
+
+  function headerBlock(hs){ return (hs||[]).map(([k,v])=>`<span class="kv"><b>${esc(k)}</b>: ${esc(v)}</span>`).join('\n'); }
+
+  function renderDetail(){
+    const f = state.detail; if(!f) return;
+    if(state.tab==='req'){
+      const rq=f.request;
+      const line = `${rq.method} ${rq.path}${rq.query?('?'+rq.query):''} ${rq.http_version}`;
+      $('dBody').innerHTML = esc(line)+'\n'+headerBlock(rq.headers)+'\n\n'+esc(b64dec(rq.body));
+    } else {
+      const rs=f.response;
+      if(!rs){ $('dBody').innerHTML='<span class="kv">no response captured</span>'; return; }
+      const line = `${rs.http_version} ${rs.status}`;
+      $('dBody').innerHTML = esc(line)+'\n'+headerBlock(rs.headers)+'\n\n'+esc(b64dec(rs.body));
+    }
+  }
+
+  // ---------- AI activity ----------
+  const aiEl=$('ai'); let aiLast=0;
+  function onActivity(a){
+    aiLast = a.ts || Date.now();
+    $('aiWho').textContent = a.agent || 'AI';
+    const label = a.tool==='connect' ? 'connected' : ('→ '+a.tool);
+    $('aiWhat').textContent = label;
+    $('aiDetail').textContent = a.detail ? ('· '+a.detail) : '';
+    aiEl.classList.add('show'); aiEl.classList.remove('flash'); void aiEl.offsetWidth; aiEl.classList.add('flash');
+    // log drawer
+    const log=$('ailogList'); const it=document.createElement('div'); it.className='item';
+    it.innerHTML=`<span class="ts">${hhmmss(aiLast)}</span> <span class="t">${esc(a.tool)}</span> <span class="d">${esc(a.detail||'')}</span>`;
+    log.prepend(it); while(log.children.length>200) log.removeChild(log.lastChild);
+    $('ailog').classList.add('show');
+    // desktop popup
+    if(state.notify && 'Notification' in window && Notification.permission==='granted'){
+      try{ new Notification('🤖 '+(a.agent||'AI')+' · '+a.tool, { body:a.detail||'', tag:'snare-ai', silent:false }); }catch(e){}
+    }
+    document.title = '🤖 '+a.tool+' · Snare';
+  }
+  setInterval(()=>{ if(aiLast){ const s=Math.round((Date.now()-aiLast)/1000);
+    $('aiAgo').textContent = s<2?'now':s<60?s+'s ago':Math.round(s/60)+'m ago';
+    if(s>8) document.title='🪤 Snare — Live'; } }, 1000);
+
+  // ---------- SSE ----------
+  function connect(){
+    const es = new EventSource('/api/v1/stream');
+    es.onopen = () => dot.classList.add('on');
+    es.onerror = () => dot.classList.remove('on');
+    es.onmessage = ev => {
+      let m; try{ m=JSON.parse(ev.data); }catch(e){ return; }
+      if(m.event==='flow_new') upsert(m.summary, true);
+      else if(m.event==='flow_update') upsert(m.summary, false);
+      else if(m.event==='activity') onActivity(m.activity);
+    };
+  }
+
+  // ---------- initial load ----------
+  async function initial(){
+    try{
+      const r = await fetch('/api/v1/flows?limit=300'); const list = await r.json();
+      list.reverse().forEach(f => upsert(f, false)); // oldest first so newest ends on top
+    }catch(e){}
+  }
+
+  // ---------- controls ----------
+  $('filter').addEventListener('input', e => {
+    state.filter = e.target.value.trim().toLowerCase();
+    state.flows.forEach(({f,el}) => el.style.display = matches(f)?'':'none');
+  });
+  $('btnAuto').onclick = e => { state.auto=!state.auto; e.target.classList.toggle('active',state.auto); };
+  $('btnClear').onclick = () => { rows.innerHTML=''; state.flows.clear(); state.order=[]; countEl.textContent=0; };
+  $('btnNotify').onclick = async e => {
+    if(!('Notification' in window)){ e.target.textContent='🔔 unsupported'; return; }
+    if(Notification.permission!=='granted') await Notification.requestPermission();
+    state.notify = Notification.permission==='granted';
+    e.target.textContent = state.notify ? '🔔 Popups: on' : '🔔 blocked';
+    e.target.classList.toggle('active', state.notify);
+  };
+  $('ailogClose').onclick = () => $('ailog').classList.remove('show');
+  $('dTabs').addEventListener('click', e => {
+    if(e.target.tagName!=='BUTTON') return;
+    state.tab = e.target.dataset.t;
+    document.querySelectorAll('#dTabs button').forEach(b=>b.classList.toggle('active', b===e.target));
+    renderDetail();
+  });
+
+  initial(); connect();
+})();
+</script>
+</body>
+</html>

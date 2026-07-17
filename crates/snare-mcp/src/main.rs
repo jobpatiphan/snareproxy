@@ -14,6 +14,59 @@ use snare_store_sqlite::SqliteStore;
 
 const PROTOCOL_VERSION: &str = "2024-11-05";
 
+/// Resolve the daemon's REST host/port from `SNARE_API` (default localhost:9000).
+fn api_host_port() -> (String, u16) {
+    let base = std::env::var("SNARE_API").unwrap_or_else(|_| "http://127.0.0.1:9000".into());
+    let hostport = base
+        .trim_start_matches("https://")
+        .trim_start_matches("http://")
+        .split('/')
+        .next()
+        .unwrap_or("127.0.0.1:9000");
+    match hostport.rsplit_once(':') {
+        Some((h, p)) => (h.to_string(), p.parse().unwrap_or(9000u16)),
+        None => (hostport.to_string(), 9000u16),
+    }
+}
+
+/// Best-effort: tell the running daemon what the agent is doing so it shows up
+/// on the live dashboard the instant it happens. Never fails the tool call —
+/// if the daemon isn't up, we just skip it.
+fn notify_activity(tool: &str, detail: &str) {
+    let (host, port) = api_host_port();
+    let agent = std::env::var("SNARE_AGENT").unwrap_or_else(|_| "ai-agent".into());
+    let body = json!({
+        "ts": snare_core::now_millis(),
+        "agent": agent,
+        "tool": tool,
+        "detail": detail,
+    })
+    .to_string();
+    if let Err(e) = post_json(&host, port, "/api/v1/activity", &body, 500) {
+        eprintln!("[snare-mcp] activity POST to {host}:{port} failed: {e}");
+    }
+}
+
+/// Minimal one-shot HTTP/1.1 POST to localhost. Reads the first response bytes
+/// (which the daemon only sends once the handler has finished) so we both avoid
+/// racing the server read and know the request completed. `read_timeout_ms`
+/// bounds how long we wait — short for activity, long for a repeater round-trip.
+fn post_json(host: &str, port: u16, path: &str, body: &str, read_timeout_ms: u64) -> std::io::Result<()> {
+    use std::io::{Read as _, Write as _};
+    let mut stream = std::net::TcpStream::connect((host, port))?;
+    stream.set_write_timeout(Some(std::time::Duration::from_millis(500)))?;
+    stream.set_read_timeout(Some(std::time::Duration::from_millis(read_timeout_ms)))?;
+    let req = format!(
+        "POST {path} HTTP/1.1\r\nHost: {host}:{port}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    stream.write_all(req.as_bytes())?;
+    stream.flush()?;
+    let mut buf = [0u8; 256];
+    let _ = stream.read(&mut buf);
+    Ok(())
+}
+
 fn db_path() -> PathBuf {
     if let Ok(home) = std::env::var("SNARE_HOME") {
         return PathBuf::from(home).join("data").join("flows.sqlite");
@@ -66,11 +119,14 @@ fn main() -> Result<()> {
 
 fn handle(method: &str, params: Option<&Value>, store: &SqliteStore) -> Result<Value> {
     match method {
-        "initialize" => Ok(json!({
-            "protocolVersion": PROTOCOL_VERSION,
-            "capabilities": { "tools": {} },
-            "serverInfo": { "name": "snare-mcp", "version": env!("CARGO_PKG_VERSION") }
-        })),
+        "initialize" => {
+            notify_activity("connect", "AI agent connected to Snare");
+            Ok(json!({
+                "protocolVersion": PROTOCOL_VERSION,
+                "capabilities": { "tools": {} },
+                "serverInfo": { "name": "snare-mcp", "version": env!("CARGO_PKG_VERSION") }
+            }))
+        }
         "ping" => Ok(json!({})),
         "tools/list" => Ok(json!({ "tools": tool_specs() })),
         "tools/call" => tools_call(params, store),
@@ -107,18 +163,90 @@ fn tool_specs() -> Value {
             "name": "proxy_stats",
             "description": "Total number of flows captured.",
             "inputSchema": { "type": "object", "properties": {} }
+        },
+        {
+            "name": "repeater_send",
+            "description": "Resend a captured request through the repeater by flow id. Returns the new flow (request + response). Needs a running `snared`.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "id": { "type": "integer", "description": "flow id to resend" }
+                },
+                "required": ["id"]
+            }
         }
     ])
+}
+
+/// Shape a full flow for AI consumption (decoded bodies, no base64 noise).
+fn format_flow(flow: &snare_core::model::Flow, part: &str) -> Value {
+    let mut out = serde_json::Map::new();
+    out.insert("id".into(), json!(flow.id));
+    out.insert("source".into(), json!(flow.source.as_str()));
+    if part == "request" || part == "all" {
+        out.insert(
+            "request".into(),
+            json!({
+                "method": flow.request.method,
+                "url": flow.request.url(),
+                "http_version": flow.request.http_version,
+                "headers": flow.request.headers,
+                "body": String::from_utf8_lossy(&flow.request.body),
+            }),
+        );
+    }
+    if part == "response" || part == "all" {
+        if let Some(resp) = &flow.response {
+            out.insert(
+                "response".into(),
+                json!({
+                    "status": resp.status,
+                    "headers": resp.headers,
+                    "body": String::from_utf8_lossy(&resp.body),
+                }),
+            );
+        }
+    }
+    Value::Object(out)
 }
 
 fn text_result(text: String) -> Value {
     json!({ "content": [ { "type": "text", "text": text } ] })
 }
 
+/// A short human-readable description of a tool call for the activity feed.
+fn summarize_call(name: &str, args: &Value) -> String {
+    match name {
+        "proxy_list_flows" => {
+            let search = args.get("search").and_then(|s| s.as_str());
+            let limit = args.get("limit").and_then(|l| l.as_i64()).unwrap_or(50);
+            match search {
+                Some(s) => format!("list flows matching \"{s}\" (limit {limit})"),
+                None => format!("list latest {limit} flows"),
+            }
+        }
+        "proxy_get_flow" => {
+            let id = args.get("id").and_then(|i| i.as_i64()).unwrap_or(-1);
+            let part = args.get("part").and_then(|p| p.as_str()).unwrap_or("all");
+            format!("inspect flow #{id} ({part})")
+        }
+        "proxy_stats" => "count captured flows".into(),
+        "repeater_send" => {
+            let id = args.get("id").and_then(|i| i.as_i64()).unwrap_or(-1);
+            format!("resend flow #{id} via repeater")
+        }
+        other => format!("call {other}"),
+    }
+}
+
 fn tools_call(params: Option<&Value>, store: &SqliteStore) -> Result<Value> {
     let params = params.cloned().unwrap_or_else(|| json!({}));
     let name = params.get("name").and_then(|n| n.as_str()).unwrap_or("");
     let args = params.get("arguments").cloned().unwrap_or_else(|| json!({}));
+
+    // Surface the intent on the live dashboard *before* running it, so the
+    // operator sees what the agent is about to do in real time.
+    notify_activity(name, &summarize_call(name, &args));
 
     match name {
         "proxy_stats" => {
@@ -158,33 +286,32 @@ fn tools_call(params: Option<&Value>, store: &SqliteStore) -> Result<Value> {
             let flow = store
                 .get_flow(id)?
                 .ok_or_else(|| anyhow::anyhow!("flow {id} not found"))?;
-            let mut out = serde_json::Map::new();
-            out.insert("id".into(), json!(flow.id));
-            if part == "request" || part == "all" {
-                out.insert(
-                    "request".into(),
-                    json!({
-                        "method": flow.request.method,
-                        "url": flow.request.url(),
-                        "http_version": flow.request.http_version,
-                        "headers": flow.request.headers,
-                        "body": String::from_utf8_lossy(&flow.request.body),
-                    }),
-                );
-            }
-            if part == "response" || part == "all" {
-                if let Some(resp) = &flow.response {
-                    out.insert(
-                        "response".into(),
-                        json!({
-                            "status": resp.status,
-                            "headers": resp.headers,
-                            "body": String::from_utf8_lossy(&resp.body),
-                        }),
-                    );
-                }
-            }
-            Ok(text_result(serde_json::to_string_pretty(&out)?))
+            Ok(text_result(serde_json::to_string_pretty(&format_flow(&flow, part))?))
+        }
+        "repeater_send" => {
+            let id = args
+                .get("id")
+                .and_then(|i| i.as_i64())
+                .ok_or_else(|| anyhow::anyhow!("missing `id`"))?;
+            let (host, port) = api_host_port();
+            // Trigger the send on the daemon (long timeout: it does a real round-trip).
+            post_json(&host, port, &format!("/api/v1/repeater/from/{id}"), "", 20_000)
+                .map_err(|e| anyhow::anyhow!("repeater send failed (is `snared run` up?): {e}"))?;
+            // The daemon stored the new flow before responding — it's now the newest.
+            let newest = store.list_flows(&FlowQuery {
+                search: None,
+                host: None,
+                limit: 1,
+                offset: 0,
+            })?;
+            let f = newest
+                .into_iter()
+                .next()
+                .ok_or_else(|| anyhow::anyhow!("no flow after repeat"))?;
+            let flow = store
+                .get_flow(f.id)?
+                .ok_or_else(|| anyhow::anyhow!("repeated flow vanished"))?;
+            Ok(text_result(serde_json::to_string_pretty(&format_flow(&flow, "all"))?))
         }
         other => anyhow::bail!("unknown tool: {other}"),
     }

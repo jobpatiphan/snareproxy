@@ -1,7 +1,9 @@
 //! `snare-tui` — terminal UI over the daemon's REST API (§5.1).
 
 mod httpclient;
+mod sse;
 
+use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
@@ -19,7 +21,7 @@ use ratatui::{
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
     Terminal,
 };
-use snare_core::model::{Flow, FlowSummary};
+use snare_core::model::{Flow, FlowEvent, FlowSummary, Source};
 
 #[derive(Parser)]
 #[command(name = "snare-tui", version, about = "Snare terminal UI")]
@@ -35,72 +37,179 @@ struct Cli {
 struct App {
     host: String,
     port: u16,
+    /// Newest-first, mirroring the REST list order.
     flows: Vec<FlowSummary>,
     state: ListState,
+    /// Selection tracked by flow id so live inserts don't shift the cursor.
+    selected_id: Option<i64>,
     detail: Option<Flow>,
+    detail_for: Option<i64>,
     status: String,
+    /// Last AI activity + when it arrived (shown briefly in the header).
+    activity: Option<(String, Instant)>,
+    events: Receiver<FlowEvent>,
     last_refresh: Instant,
 }
 
 impl App {
     fn new(host: String, port: u16) -> Self {
-        let mut state = ListState::default();
-        state.select(Some(0));
+        let events = sse::subscribe(host.clone(), port);
         Self {
             host,
             port,
             flows: Vec::new(),
-            state,
+            state: ListState::default(),
+            selected_id: None,
             detail: None,
-            status: "loading…".into(),
+            detail_for: None,
+            status: "connecting…".into(),
+            activity: None,
+            events,
             last_refresh: Instant::now() - Duration::from_secs(10),
         }
     }
 
+    /// Full reload from REST — the initial snapshot and a periodic self-heal in
+    /// case the SSE stream drops.
     fn refresh(&mut self) {
-        match httpclient::get_json::<Vec<FlowSummary>>(
-            &self.host,
-            self.port,
-            "/api/v1/flows?limit=500",
-        ) {
-            Ok(flows) => {
-                self.status = format!("{} flows", flows.len());
-                self.flows = flows;
-                if self.state.selected().unwrap_or(0) >= self.flows.len() {
-                    self.state.select(if self.flows.is_empty() {
-                        None
-                    } else {
-                        Some(self.flows.len() - 1)
-                    });
-                }
-                self.load_detail();
-            }
-            Err(e) => self.status = format!("error: {e}"),
+        if let Ok(flows) =
+            httpclient::get_json::<Vec<FlowSummary>>(&self.host, self.port, "/api/v1/flows?limit=500")
+        {
+            self.flows = flows;
+            self.status = format!("{} flows", self.flows.len());
+            self.resolve_selection();
+            self.ensure_detail();
         }
         self.last_refresh = Instant::now();
     }
 
-    fn load_detail(&mut self) {
-        let Some(i) = self.state.selected() else {
-            self.detail = None;
+    /// Drain everything the live stream has delivered since last tick.
+    fn pump_events(&mut self) {
+        let mut touched_selected = false;
+        while let Ok(ev) = self.events.try_recv() {
+            match ev {
+                FlowEvent::FlowNew { summary } => {
+                    if !self.flows.iter().any(|f| f.id == summary.id) {
+                        self.flows.insert(0, summary); // newest first
+                    }
+                }
+                FlowEvent::FlowUpdate { summary } => {
+                    if Some(summary.id) == self.selected_id {
+                        touched_selected = true;
+                    }
+                    if let Some(slot) = self.flows.iter_mut().find(|f| f.id == summary.id) {
+                        *slot = summary;
+                    } else {
+                        self.flows.insert(0, summary);
+                    }
+                }
+                FlowEvent::Activity { activity } => {
+                    let label = if activity.tool == "connect" {
+                        format!("🤖 {} connected", activity.agent)
+                    } else {
+                        format!("🤖 {} → {} · {}", activity.agent, activity.tool, activity.detail)
+                    };
+                    self.activity = Some((label, Instant::now()));
+                }
+            }
+        }
+        self.status = format!("{} flows", self.flows.len());
+        self.resolve_selection();
+        // Reload detail if the selected flow just gained its response.
+        if touched_selected {
+            self.detail_for = None;
+        }
+        self.ensure_detail();
+    }
+
+    fn selected_index(&self) -> Option<usize> {
+        let id = self.selected_id?;
+        self.flows.iter().position(|f| f.id == id)
+    }
+
+    /// Keep `selected_id`, `state`, and the flow list consistent.
+    fn resolve_selection(&mut self) {
+        if self.flows.is_empty() {
+            self.selected_id = None;
+            self.state.select(None);
             return;
-        };
-        let Some(f) = self.flows.get(i) else {
-            self.detail = None;
+        }
+        // Default to the newest flow if nothing valid is selected.
+        if self.selected_index().is_none() {
+            self.selected_id = Some(self.flows[0].id);
+        }
+        self.state.select(self.selected_index());
+    }
+
+    /// Fetch the full flow for the selection, but only when it changed.
+    fn ensure_detail(&mut self) {
+        if self.selected_id == self.detail_for {
             return;
+        }
+        self.detail = match self.selected_id {
+            Some(id) => {
+                httpclient::get_json::<Flow>(&self.host, self.port, &format!("/api/v1/flows/{id}"))
+                    .ok()
+            }
+            None => None,
         };
-        let path = format!("/api/v1/flows/{}", f.id);
-        self.detail = httpclient::get_json::<Flow>(&self.host, self.port, &path).ok();
+        self.detail_for = self.selected_id;
     }
 
     fn move_by(&mut self, delta: isize) {
-        if self.flows.is_empty() {
+        let Some(cur) = self.selected_index() else {
             return;
-        }
-        let cur = self.state.selected().unwrap_or(0) as isize;
-        let next = (cur + delta).clamp(0, self.flows.len() as isize - 1) as usize;
+        };
+        let next = (cur as isize + delta).clamp(0, self.flows.len() as isize - 1) as usize;
+        self.selected_id = Some(self.flows[next].id);
         self.state.select(Some(next));
-        self.load_detail();
+        self.ensure_detail();
+    }
+
+    fn select_index(&mut self, i: usize) {
+        if let Some(f) = self.flows.get(i) {
+            self.selected_id = Some(f.id);
+            self.state.select(Some(i));
+            self.ensure_detail();
+        }
+    }
+
+    /// Resend the selected request through the repeater (§5.1 `r`). The new flow
+    /// also arrives via the live stream, but we jump to it immediately.
+    fn resend(&mut self) {
+        let Some(id) = self.selected_id else { return };
+        match httpclient::post_json::<Flow>(&self.host, self.port, &format!("/api/v1/repeater/from/{id}")) {
+            Ok(flow) => {
+                let new_id = flow.id;
+                if !self.flows.iter().any(|f| f.id == new_id) {
+                    // insert a placeholder summary; the stream will flesh it out
+                    self.flows.insert(0, summary_from(&flow));
+                }
+                self.selected_id = Some(new_id);
+                self.detail = Some(flow);
+                self.detail_for = Some(new_id);
+                self.resolve_selection();
+                self.activity = Some((format!("↻ resent → #{new_id}"), Instant::now()));
+            }
+            Err(e) => self.activity = Some((format!("resend failed: {e}"), Instant::now())),
+        }
+    }
+}
+
+fn summary_from(flow: &Flow) -> FlowSummary {
+    FlowSummary {
+        id: flow.id,
+        ts: flow.ts,
+        source: flow.source,
+        method: flow.request.method.clone(),
+        scheme: flow.request.scheme.clone(),
+        host: flow.request.host.clone(),
+        port: flow.request.port,
+        path: flow.request.path.clone(),
+        status: flow.response.as_ref().map(|r| r.status),
+        mime: flow.response.as_ref().and_then(|r| r.mime().map(String::from)),
+        resp_size: flow.response.as_ref().map(|r| r.body.len() as u64),
+        duration_ms: flow.duration_ms,
     }
 }
 
@@ -113,6 +222,7 @@ fn main() -> Result<()> {
     let mut terminal = Terminal::new(backend)?;
 
     let mut app = App::new(cli.host, cli.port);
+    app.refresh(); // initial snapshot
     let res = run(&mut terminal, &mut app);
 
     disable_raw_mode()?;
@@ -123,12 +233,14 @@ fn main() -> Result<()> {
 
 fn run<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Result<()> {
     loop {
-        if app.last_refresh.elapsed() > Duration::from_secs(2) {
+        app.pump_events();
+        // Cheap periodic self-heal in case the live stream dropped silently.
+        if app.last_refresh.elapsed() > Duration::from_secs(15) {
             app.refresh();
         }
         terminal.draw(|f| draw(f, app))?;
 
-        if event::poll(Duration::from_millis(400))? {
+        if event::poll(Duration::from_millis(250))? {
             if let Event::Key(k) = event::read()? {
                 if k.kind != KeyEventKind::Press {
                     continue;
@@ -137,17 +249,14 @@ fn run<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>, app: &mut App) 
                     KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
                     KeyCode::Char('j') | KeyCode::Down => app.move_by(1),
                     KeyCode::Char('k') | KeyCode::Up => app.move_by(-1),
-                    KeyCode::Char('g') => {
-                        app.state.select(Some(0));
-                        app.load_detail();
-                    }
+                    KeyCode::Char('g') => app.select_index(0),
                     KeyCode::Char('G') => {
                         if !app.flows.is_empty() {
-                            app.state.select(Some(app.flows.len() - 1));
-                            app.load_detail();
+                            app.select_index(app.flows.len() - 1);
                         }
                     }
-                    KeyCode::Char('r') => app.refresh(),
+                    KeyCode::Char('r') => app.resend(),
+                    KeyCode::Char('R') => app.refresh(),
                     _ => {}
                 }
             }
@@ -161,12 +270,22 @@ fn draw(f: &mut ratatui::Frame, app: &App) {
         .constraints([Constraint::Length(1), Constraint::Min(0), Constraint::Length(1)])
         .split(f.area());
 
-    let title = Line::from(vec![
+    let mut title_spans = vec![
         Span::styled(" 🪤 Snare ", Style::default().fg(Color::Black).bg(Color::Yellow).add_modifier(Modifier::BOLD)),
         Span::raw("  "),
-        Span::styled(&app.status, Style::default().fg(Color::Cyan)),
-    ]);
-    f.render_widget(Paragraph::new(title), chunks[0]);
+        Span::styled(app.status.clone(), Style::default().fg(Color::Cyan)),
+    ];
+    // Show the latest AI activity for a few seconds after it lands.
+    if let Some((label, at)) = &app.activity {
+        if at.elapsed() < Duration::from_secs(8) {
+            title_spans.push(Span::raw("   "));
+            title_spans.push(Span::styled(
+                label.clone(),
+                Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD),
+            ));
+        }
+    }
+    f.render_widget(Paragraph::new(Line::from(title_spans)), chunks[0]);
 
     let body = Layout::default()
         .direction(Direction::Horizontal)
@@ -185,7 +304,9 @@ fn draw(f: &mut ratatui::Frame, app: &App) {
                 Some(_) => Color::Red,
                 None => Color::DarkGray,
             };
+            let tag = if fl.source == Source::Repeater { "↻" } else { " " };
             ListItem::new(Line::from(vec![
+                Span::styled(format!("{tag} "), Style::default().fg(Color::Yellow)),
                 Span::styled(format!("{status:>3} "), Style::default().fg(color)),
                 Span::styled(format!("{:<5} ", fl.method), Style::default().fg(Color::Magenta)),
                 Span::raw(format!("{}{}", fl.host, fl.path)),
@@ -203,7 +324,7 @@ fn draw(f: &mut ratatui::Frame, app: &App) {
     f.render_widget(detail_widget(app), body[1]);
 
     let help = Line::from(Span::styled(
-        " j/k move · g/G top/bottom · r refresh · q quit ",
+        " j/k move · g/G top/bottom · r resend · R reload · q quit ",
         Style::default().fg(Color::DarkGray),
     ));
     f.render_widget(Paragraph::new(help), chunks[2]);

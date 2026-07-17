@@ -7,7 +7,7 @@
 pub mod model;
 pub mod store;
 
-pub use model::{Flow, FlowEvent, FlowSummary, Header, HttpRequest, HttpResponse, Source};
+pub use model::{Activity, Flow, FlowEvent, FlowSummary, Header, HttpRequest, HttpResponse, Source};
 pub use store::{FlowQuery, FlowStore};
 
 /// Current unix time in milliseconds.

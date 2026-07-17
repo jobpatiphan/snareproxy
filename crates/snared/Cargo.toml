@@ -22,3 +22,5 @@ directories.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 axum = "0.7"
+tokio-stream = { version = "0.1", features = ["sync"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "gzip", "deflate"] }

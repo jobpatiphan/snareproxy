@@ -120,12 +120,30 @@ pub struct FlowSummary {
     pub duration_ms: Option<u64>,
 }
 
+/// An AI / automation action, surfaced live so the operator can watch — in
+/// real time — exactly what an agent driving Snare is doing.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Activity {
+    /// Unix millis; 0 (or omitted) means "stamp it on arrival".
+    #[serde(default)]
+    pub ts: i64,
+    /// Who is acting, e.g. "claude" or the MCP client name.
+    pub agent: String,
+    /// The tool/action invoked, e.g. "proxy_list_flows".
+    pub tool: String,
+    /// Human-readable summary of the arguments/intent.
+    #[serde(default)]
+    pub detail: String,
+}
+
 /// Realtime events emitted by the engine/daemon.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "event", rename_all = "snake_case")]
 pub enum FlowEvent {
     FlowNew { summary: FlowSummary },
     FlowUpdate { summary: FlowSummary },
+    /// An AI agent invoked a tool against Snare.
+    Activity { activity: Activity },
 }
 
 /// base64 (std, no padding issues) for byte bodies in JSON.
