@@ -11,3 +11,4 @@ thiserror.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tokio = { workspace = true, features = ["sync"] }
+regex.workspace = true

@@ -98,6 +98,25 @@
 
   /* Intercept editor */
   header input.scope{width:150px}
+  /* Match & Replace modal */
+  #rules{position:fixed;inset:0;background:rgba(2,4,8,.72);display:none;align-items:center;justify-content:center;z-index:20}
+  #rules.show{display:flex}
+  #rules .rbox{width:min(760px,92vw);max-height:80vh;background:var(--panel);border:1px solid var(--line);
+    border-radius:10px;display:flex;flex-direction:column;overflow:hidden}
+  #rules .rhead{display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--line);font-weight:700}
+  #rules .rhead .grow{flex:1} #rules .rhead span{cursor:pointer;color:var(--dim)}
+  #rules .radd{display:flex;gap:6px;padding:10px 14px;border-bottom:1px solid var(--line)}
+  #rules select,#rules input{background:var(--panel2);border:1px solid var(--line);color:var(--fg);
+    padding:5px 8px;border-radius:6px;font-family:var(--mono);font-size:12px}
+  #rules #rpattern,#rules #rreplace{flex:1}
+  #rules .radd button{background:var(--accent);color:#000;border:0;padding:5px 14px;border-radius:6px;cursor:pointer;font-weight:700}
+  #rules .rerr{color:var(--err);font-family:var(--mono);font-size:12px;padding:0 14px}
+  #rules .rerr:empty{display:none} #rules .rerr:not(:empty){padding:6px 14px}
+  #rules .rlist{overflow:auto;padding:6px 0}
+  #rules .ritem{display:flex;align-items:center;gap:10px;padding:6px 14px;border-bottom:1px solid var(--line);font-family:var(--mono);font-size:12px}
+  #rules .ritem .rp{color:var(--info);width:120px} #rules .ritem .rx{flex:1;color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #rules .ritem .rtoggle{cursor:pointer} #rules .ritem .rdel{cursor:pointer;color:var(--err)}
+  #rules .ritem.off{opacity:.45}
   #btnIntercept.on,#btnInterceptResp.on{background:var(--err);color:#fff;border-color:var(--err);font-weight:700}
   #intercept{position:fixed;inset:0;background:rgba(2,4,8,.72);display:none;
     flex-direction:column;align-items:center;justify-content:center;z-index:20;padding:4vh 4vw}
@@ -126,6 +145,7 @@
   <input type="text" id="scope" class="scope" placeholder="scope: host,host…" title="Limit intercept to these hosts (comma-separated; empty = all)" autocomplete="off">
   <button id="btnIntercept" title="Hold requests at a breakpoint to edit/drop them">⏸ Req: off</button>
   <button id="btnInterceptResp" title="Also hold responses">⏸ Resp: off</button>
+  <button id="btnRules" title="Match &amp; Replace rules">⚙ M&amp;R</button>
   <button id="btnNotify" title="Desktop popups when the AI acts">🔔 Popups: off</button>
   <button id="btnAuto" class="active" title="Auto-scroll to newest">⤓ Auto</button>
   <button id="btnClear" title="Clear the view (does not delete stored flows)">Clear</button>
@@ -162,6 +182,26 @@
 <div id="ailog">
   <div class="h"><span>🤖</span> AI activity <span class="grow"></span><span id="ailogClose">✕</span></div>
   <div class="list" id="ailogList"></div>
+</div>
+
+<div id="rules">
+  <div class="rbox">
+    <div class="rhead">⚙ Match &amp; Replace <span class="grow"></span><span id="rulesClose">✕</span></div>
+    <div class="radd">
+      <select id="rpart">
+        <option value="request_url">req url</option>
+        <option value="request_header">req header</option>
+        <option value="request_body">req body</option>
+        <option value="response_header">resp header</option>
+        <option value="response_body">resp body</option>
+      </select>
+      <input type="text" id="rpattern" placeholder="regex pattern">
+      <input type="text" id="rreplace" placeholder="replacement ($1 ok)">
+      <button id="raddbtn">Add</button>
+    </div>
+    <div class="rerr" id="rerr"></div>
+    <div class="rlist" id="rlist"></div>
+  </div>
 </div>
 
 <div id="intercept">
@@ -371,6 +411,37 @@
     const r = $('btnInterceptResp'); r.textContent = responses ? '⏸ Resp: ON' : '⏸ Resp: off'; r.classList.toggle('on', responses);
   }
 
+  // ---------- Match & Replace ----------
+  async function loadRules(){
+    try{
+      const rules = await (await fetch('/api/v1/rules')).json();
+      const el = $('rlist');
+      el.innerHTML = rules.length ? '' : '<div class="ritem" style="opacity:.5">no rules yet</div>';
+      for(const r of rules){
+        const d = document.createElement('div');
+        d.className = 'ritem' + (r.enabled?'':' off');
+        d.innerHTML = `<span class="rtoggle" title="enable/disable">${r.enabled?'☑':'☐'}</span>`+
+          `<span class="rp">${esc(r.part)}</span>`+
+          `<span class="rx" title="${esc(r.pattern)} → ${esc(r.replace)}">${esc(r.pattern)} → ${esc(r.replace)}</span>`+
+          `<span class="rdel" title="delete">🗑</span>`;
+        d.querySelector('.rtoggle').onclick = async () => {
+          await fetch(`/api/v1/rules/${r.id}/toggle`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({on:!r.enabled})});
+          loadRules();
+        };
+        d.querySelector('.rdel').onclick = async () => { await fetch(`/api/v1/rules/${r.id}`,{method:'DELETE'}); loadRules(); };
+        el.appendChild(d);
+      }
+    }catch(e){}
+  }
+  async function addRule(){
+    $('rerr').textContent = '';
+    const body = { part: $('rpart').value, pattern: $('rpattern').value, replace: $('rreplace').value };
+    if(!body.pattern){ $('rerr').textContent = 'pattern required'; return; }
+    const r = await fetch('/api/v1/rules',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    if(r.ok){ $('rpattern').value=''; $('rreplace').value=''; loadRules(); }
+    else { const e = await r.json().catch(()=>({})); $('rerr').textContent = 'bad regex: '+(e.error||r.status); }
+  }
+
   // ---------- SSE ----------
   function connect(){
     const es = new EventSource('/api/v1/stream');
@@ -438,6 +509,10 @@
   $('iedit').addEventListener('keydown', e => {
     if((e.ctrlKey||e.metaKey) && e.key==='Enter'){ e.preventDefault(); iresolve('forward'); }
   });
+  $('btnRules').onclick = () => { $('rules').classList.add('show'); loadRules(); };
+  $('rulesClose').onclick = () => $('rules').classList.remove('show');
+  $('raddbtn').onclick = addRule;
+  $('rreplace').addEventListener('keydown', e => { if(e.key==='Enter') addRule(); });
   $('ailogClose').onclick = () => $('ailog').classList.remove('show');
   $('dTabs').addEventListener('click', e => {
     if(e.target.tagName!=='BUTTON') return;

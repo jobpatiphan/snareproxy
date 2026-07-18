@@ -138,14 +138,15 @@ async fn cmd_run(paths: &Paths, proxy_addr: SocketAddr, api_addr: SocketAddr) ->
     let store_dyn: Arc<dyn FlowStore> = store.clone();
     let (events, _rx) = tokio::sync::broadcast::channel(1024);
     let intercept = Arc::new(snare_core::intercept::Intercept::new());
+    let rules = Arc::new(snare_core::rules::Rules::new());
 
-    // REST API — shares the live event bus and the intercept breakpoint with the
-    // proxy engine so the SSE stream, activity sink, and intercept all feed the
-    // same dashboard.
+    // REST API — shares the live event bus, the intercept breakpoint, and the
+    // match/replace rules with the proxy engine.
     let app = api::router(api::AppState {
         store: store_dyn.clone(),
         events: events.clone(),
         intercept: intercept.clone(),
+        rules: rules.clone(),
     });
     let listener = tokio::net::TcpListener::bind(api_addr)
         .await
@@ -171,7 +172,7 @@ async fn cmd_run(paths: &Paths, proxy_addr: SocketAddr, api_addr: SocketAddr) ->
     println!("  dashboard : http://{api_addr}/  ← open this to watch traffic live");
     println!("  press Ctrl-C to stop");
 
-    snare_engine::run(cfg, store_dyn, events, intercept, async {
+    snare_engine::run(cfg, store_dyn, events, intercept, rules, async {
         let _ = tokio::signal::ctrl_c().await;
     })
     .await?;

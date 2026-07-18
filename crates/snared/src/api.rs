@@ -22,6 +22,7 @@ use serde::Deserialize;
 use serde_json::json;
 use snare_core::intercept::{Edit, Intercept, RespEdit};
 use snare_core::model::{Activity, FlowEvent, Header};
+use snare_core::rules::{Part, Rules};
 use snare_core::store::{FlowQuery, FlowStore};
 use tokio::sync::broadcast;
 use tokio_stream::{wrappers::BroadcastStream, Stream, StreamExt};
@@ -35,6 +36,8 @@ pub struct AppState {
     pub events: broadcast::Sender<FlowEvent>,
     /// Interactive intercept breakpoint shared with the engine.
     pub intercept: Arc<Intercept>,
+    /// Match & Replace rules shared with the engine.
+    pub rules: Arc<Rules>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -62,6 +65,9 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/intercept/:id/drop", post(intercept_drop))
         .route("/api/v1/intercept/:id/forward-response", post(intercept_forward_resp))
         .route("/api/v1/intercept/:id/drop-response", post(intercept_drop_resp))
+        .route("/api/v1/rules", get(rules_list).post(rules_add))
+        .route("/api/v1/rules/:id", axum::routing::delete(rules_delete))
+        .route("/api/v1/rules/:id/toggle", post(rules_toggle))
         .with_state(state)
 }
 
@@ -315,6 +321,59 @@ async fn intercept_drop(State(st): State<AppState>, Path(id): Path<u64>) -> Resp
         Json(json!({ "ok": true })).into_response()
     } else {
         (StatusCode::NOT_FOUND, Json(json!({ "error": "no such held request" }))).into_response()
+    }
+}
+
+// ---- Match & Replace rules ----
+
+async fn rules_list(State(st): State<AppState>) -> Response {
+    Json(st.rules.list()).into_response()
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RuleBody {
+    #[serde(default)]
+    pub name: String,
+    pub part: Part,
+    pub pattern: String,
+    #[serde(default)]
+    pub replace: String,
+    #[serde(default = "yes")]
+    pub enabled: bool,
+}
+fn yes() -> bool {
+    true
+}
+
+async fn rules_add(State(st): State<AppState>, Json(b): Json<RuleBody>) -> Response {
+    match st.rules.add(b.name, b.part, b.pattern, b.replace, b.enabled) {
+        Ok(spec) => Json(spec).into_response(),
+        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({ "error": e }))).into_response(),
+    }
+}
+
+async fn rules_delete(State(st): State<AppState>, Path(id): Path<u64>) -> Response {
+    if st.rules.remove(id) {
+        Json(json!({ "ok": true })).into_response()
+    } else {
+        (StatusCode::NOT_FOUND, Json(json!({ "error": "no such rule" }))).into_response()
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RuleToggle {
+    pub on: bool,
+}
+
+async fn rules_toggle(
+    State(st): State<AppState>,
+    Path(id): Path<u64>,
+    Json(b): Json<RuleToggle>,
+) -> Response {
+    if st.rules.set_enabled(id, b.on) {
+        Json(json!({ "ok": true })).into_response()
+    } else {
+        (StatusCode::NOT_FOUND, Json(json!({ "error": "no such rule" }))).into_response()
     }
 }
 

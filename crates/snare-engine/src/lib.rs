@@ -30,6 +30,7 @@ use snare_core::intercept::{Decision, Intercept, RespDecision};
 use snare_core::model::{
     FlowEvent, FlowSummary, Header, HttpRequest, HttpResponse, Source,
 };
+use snare_core::rules::Rules;
 use snare_core::store::FlowStore;
 use tokio::sync::broadcast;
 
@@ -48,6 +49,7 @@ struct CaptureHandler {
     store: Arc<dyn FlowStore>,
     events: broadcast::Sender<FlowEvent>,
     intercept: Arc<Intercept>,
+    rules: Arc<Rules>,
     /// Outstanding (flow_id, started, host) tuples, oldest first. Host lets
     /// response interception honour scope.
     pending: VecDeque<(i64, Instant, String)>,
@@ -198,9 +200,11 @@ impl HttpHandler for CaptureHandler {
             body: bytes.to_vec(),
         };
 
+        // Match & Replace: automatic regex rewrites before anything else sees it.
+        let mut dirty = self.rules.apply_request(&mut request);
+
         // Interactive intercept (§5.1): hold the request at the breakpoint until
         // the operator forwards (optionally edited) or drops it.
-        let mut forwarded_bytes = bytes;
         if self.intercept.enabled() && self.intercept.in_scope(&request.host) {
             let (iid, rx) = self.intercept.register(request.clone());
             let _ = self.events.send(FlowEvent::InterceptPaused {
@@ -227,12 +231,19 @@ impl HttpHandler for CaptureHandler {
                         action: "forward".into(),
                     });
                     request = *edited;
-                    forwarded_bytes = bytes::Bytes::from(request.body.clone());
-                    rebuild_parts(&mut parts, &request);
+                    dirty = true;
                 }
                 Err(_) => {} // decision channel dropped — forward as captured
             }
         }
+
+        // Rebuild the wire request once if rules or intercept changed it.
+        let forwarded_bytes = if dirty {
+            rebuild_parts(&mut parts, &request);
+            bytes::Bytes::from(request.body.clone())
+        } else {
+            bytes
+        };
 
         let ts = snare_core::now_millis();
         match self.store.insert_request(ts, Source::Proxy, &request) {
@@ -266,7 +277,9 @@ impl HttpHandler for CaptureHandler {
             headers: to_headers(&parts.headers),
             body: bytes.to_vec(),
         };
-        let mut resp_bytes = bytes;
+
+        // Match & Replace on the response.
+        let mut dirty = self.rules.apply_response(&mut response);
 
         let entry = self.pending.pop_front();
         let host = entry.as_ref().map(|(_, _, h)| h.as_str()).unwrap_or("");
@@ -291,8 +304,7 @@ impl HttpHandler for CaptureHandler {
                         headers: vec![],
                         body: b"dropped by Snare".to_vec(),
                     };
-                    resp_bytes = bytes::Bytes::from_static(b"dropped by Snare");
-                    rebuild_resp_parts(&mut parts, &response);
+                    dirty = true;
                 }
                 Ok(RespDecision::Forward(edited)) => {
                     let _ = self.events.send(FlowEvent::InterceptResolved {
@@ -300,12 +312,18 @@ impl HttpHandler for CaptureHandler {
                         action: "forward".into(),
                     });
                     response = *edited;
-                    resp_bytes = bytes::Bytes::from(response.body.clone());
-                    rebuild_resp_parts(&mut parts, &response);
+                    dirty = true;
                 }
                 Err(_) => {}
             }
         }
+
+        let resp_bytes = if dirty {
+            rebuild_resp_parts(&mut parts, &response);
+            bytes::Bytes::from(response.body.clone())
+        } else {
+            bytes
+        };
 
         if let Some((id, started, _)) = entry {
             let dur = started.elapsed().as_millis() as u64;
@@ -346,6 +364,7 @@ pub async fn run<F>(
     store: Arc<dyn FlowStore>,
     events: broadcast::Sender<FlowEvent>,
     intercept: Arc<Intercept>,
+    rules: Arc<Rules>,
     shutdown: F,
 ) -> Result<()>
 where
@@ -356,6 +375,7 @@ where
         store,
         events,
         intercept,
+        rules,
         pending: VecDeque::new(),
     };
 
