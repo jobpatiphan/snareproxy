@@ -23,6 +23,7 @@ use serde_json::json;
 use snare_core::intercept::{Edit, Intercept, RespEdit};
 use snare_core::model::{Activity, FlowEvent, Header};
 use snare_core::rules::{Part, Rules};
+use snare_core::scanner::Scanner;
 use snare_core::store::{FlowQuery, FlowStore};
 use tokio::sync::broadcast;
 use tokio_stream::{wrappers::BroadcastStream, Stream, StreamExt};
@@ -38,6 +39,8 @@ pub struct AppState {
     pub intercept: Arc<Intercept>,
     /// Match & Replace rules shared with the engine.
     pub rules: Arc<Rules>,
+    /// Passive scanner shared with the engine.
+    pub scanner: Arc<Scanner>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -69,6 +72,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/rules/:id", axum::routing::delete(rules_delete))
         .route("/api/v1/rules/:id/toggle", post(rules_toggle))
         .route("/api/v1/intruder", post(intruder_run))
+        .route("/api/v1/findings", get(findings_list).post(scanner_toggle))
         .with_state(state)
 }
 
@@ -407,6 +411,29 @@ async fn intruder_run(State(st): State<AppState>, Json(b): Json<IntruderBody>) -
     let n = b.payloads.len();
     let results = intruder::run(&st.store, &st.events, &base, &b.marker, b.payloads, b.concurrency).await;
     Json(json!({ "count": n, "results": results })).into_response()
+}
+
+// ---- Passive scanner ----
+
+async fn findings_list(State(st): State<AppState>) -> Response {
+    Json(json!({ "on": st.scanner.enabled(), "findings": st.scanner.list() })).into_response()
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ScannerToggle {
+    pub on: Option<bool>,
+    #[serde(default)]
+    pub clear: bool,
+}
+
+async fn scanner_toggle(State(st): State<AppState>, Json(b): Json<ScannerToggle>) -> Response {
+    if let Some(on) = b.on {
+        st.scanner.set_enabled(on);
+    }
+    if b.clear {
+        st.scanner.clear();
+    }
+    Json(json!({ "on": st.scanner.enabled() })).into_response()
 }
 
 fn err(e: anyhow::Error) -> Response {

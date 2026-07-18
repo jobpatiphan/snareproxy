@@ -116,6 +116,9 @@ impl App {
                 FlowEvent::InterceptPaused { .. } | FlowEvent::InterceptRespPaused { .. } => {
                     self.activity = Some(("⏸ held (use Web UI)".into(), Instant::now()));
                 }
+                FlowEvent::Finding { finding } => {
+                    self.activity = Some((format!("⚠ {}", finding.title), Instant::now()));
+                }
                 FlowEvent::InterceptResolved { .. } | FlowEvent::InterceptState { .. } => {}
             }
         }

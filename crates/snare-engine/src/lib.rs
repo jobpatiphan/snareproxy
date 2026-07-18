@@ -31,6 +31,7 @@ use snare_core::model::{
     FlowEvent, FlowSummary, Header, HttpRequest, HttpResponse, Source,
 };
 use snare_core::rules::Rules;
+use snare_core::scanner::Scanner;
 use snare_core::store::FlowStore;
 use tokio::sync::broadcast;
 
@@ -50,6 +51,7 @@ struct CaptureHandler {
     events: broadcast::Sender<FlowEvent>,
     intercept: Arc<Intercept>,
     rules: Arc<Rules>,
+    scanner: Arc<Scanner>,
     /// Outstanding (flow_id, started, host) tuples, oldest first. Host lets
     /// response interception honour scope.
     pending: VecDeque<(i64, Instant, String)>,
@@ -336,6 +338,10 @@ impl HttpHandler for CaptureHandler {
                 summary.resp_size = Some(response.body.len() as u64);
                 summary.duration_ms = Some(dur);
                 let _ = self.events.send(FlowEvent::FlowUpdate { summary });
+                // Passive scan the completed flow; stream any new findings.
+                for finding in self.scanner.scan(&flow) {
+                    let _ = self.events.send(FlowEvent::Finding { finding });
+                }
             }
         }
 
@@ -365,6 +371,7 @@ pub async fn run<F>(
     events: broadcast::Sender<FlowEvent>,
     intercept: Arc<Intercept>,
     rules: Arc<Rules>,
+    scanner: Arc<Scanner>,
     shutdown: F,
 ) -> Result<()>
 where
@@ -376,6 +383,7 @@ where
         events,
         intercept,
         rules,
+        scanner,
         pending: VecDeque::new(),
     };
 

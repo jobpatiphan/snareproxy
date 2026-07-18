@@ -117,6 +117,20 @@
   #rules .ritem .rp{color:var(--info);width:120px} #rules .ritem .rx{flex:1;color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   #rules .ritem .rtoggle{cursor:pointer} #rules .ritem .rdel{cursor:pointer;color:var(--err)}
   #rules .ritem.off{opacity:.45}
+  #btnFindings b{color:var(--err)}
+  #findings{position:fixed;inset:0;background:rgba(2,4,8,.72);display:none;align-items:center;justify-content:center;z-index:20}
+  #findings.show{display:flex}
+  #findings .fbox{width:min(760px,92vw);max-height:80vh;background:var(--panel);border:1px solid var(--line);
+    border-radius:10px;display:flex;flex-direction:column;overflow:hidden}
+  #findings .rhead{display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--line);font-weight:700}
+  #findings .rhead .grow{flex:1} #findings .rhead span[id]{cursor:pointer;color:var(--dim)}
+  #findings .flist{overflow:auto;padding:4px 0}
+  #findings .fitem{padding:8px 14px;border-bottom:1px solid var(--line);font-size:12px}
+  #findings .fitem .sev{font-family:var(--mono);font-weight:700;font-size:11px;padding:1px 6px;border-radius:4px;margin-right:8px}
+  #findings .sev-high{background:#5b1a1a;color:#ff9a9a} #findings .sev-medium{background:#4d3a10;color:#f0b429}
+  #findings .sev-low{background:#12324a;color:#58a6ff} #findings .sev-info{background:#21262d;color:#8b949e}
+  #findings .fitem .fh{color:var(--dim);font-family:var(--mono)} #findings .fitem .fd{color:var(--dim);margin-top:3px}
+  #findings .empty2{color:var(--dim);padding:24px;text-align:center;font-style:italic}
   #btnIntercept.on,#btnInterceptResp.on{background:var(--err);color:#fff;border-color:var(--err);font-weight:700}
   #intercept{position:fixed;inset:0;background:rgba(2,4,8,.72);display:none;
     flex-direction:column;align-items:center;justify-content:center;z-index:20;padding:4vh 4vw}
@@ -146,6 +160,7 @@
   <button id="btnIntercept" title="Hold requests at a breakpoint to edit/drop them">⏸ Req: off</button>
   <button id="btnInterceptResp" title="Also hold responses">⏸ Resp: off</button>
   <button id="btnRules" title="Match &amp; Replace rules">⚙ M&amp;R</button>
+  <button id="btnFindings" title="Passive scan findings">⚠ Findings <b id="findCount"></b></button>
   <button id="btnNotify" title="Desktop popups when the AI acts">🔔 Popups: off</button>
   <button id="btnAuto" class="active" title="Auto-scroll to newest">⤓ Auto</button>
   <button id="btnClear" title="Clear the view (does not delete stored flows)">Clear</button>
@@ -182,6 +197,14 @@
 <div id="ailog">
   <div class="h"><span>🤖</span> AI activity <span class="grow"></span><span id="ailogClose">✕</span></div>
   <div class="list" id="ailogList"></div>
+</div>
+
+<div id="findings">
+  <div class="fbox">
+    <div class="rhead">⚠ Passive scan findings <span class="grow"></span>
+      <span id="findClear" title="clear" style="margin-right:10px">clear</span><span id="findClose">✕</span></div>
+    <div class="flist" id="flist"></div>
+  </div>
 </div>
 
 <div id="rules">
@@ -221,7 +244,7 @@
   const $ = id => document.getElementById(id);
   const rows = $('rows'), countEl = $('count'), dot = $('dot');
   const state = { flows: new Map(), order: [], sel: null, detail: null, tab: 'req',
-                  auto: true, notify: false, filter: '', intercept: false, interceptResp: false, held: [] };
+                  auto: true, notify: false, filter: '', intercept: false, interceptResp: false, held: [], findings: [] };
 
   // ---------- helpers ----------
   const esc = s => (s==null?'':String(s)).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
@@ -442,6 +465,29 @@
     else { const e = await r.json().catch(()=>({})); $('rerr').textContent = 'bad regex: '+(e.error||r.status); }
   }
 
+  // ---------- Findings (passive scan) ----------
+  function fitemHtml(f){
+    return `<span class="sev sev-${esc(f.severity)}">${esc(f.severity.toUpperCase())}</span>`+
+      `<b>${esc(f.title)}</b> <span class="fh">— ${esc(f.host)}</span>`+
+      `<div class="fd">${esc(f.detail||'')}</div>`;
+  }
+  function addFinding(f, prepend){
+    state.findings.push(f);
+    $('findCount').textContent = state.findings.length ? state.findings.length : '';
+    const el = $('flist');
+    if(el.querySelector('.empty2')) el.innerHTML = '';
+    const d = document.createElement('div'); d.className = 'fitem'; d.innerHTML = fitemHtml(f);
+    if(prepend) el.prepend(d); else el.appendChild(d);
+  }
+  async function loadFindings(){
+    try{
+      const r = await (await fetch('/api/v1/findings')).json();
+      state.findings = [];
+      $('flist').innerHTML = (r.findings||[]).length ? '' : '<div class="empty2">no findings yet — browse through the proxy</div>';
+      (r.findings||[]).forEach(f => addFinding(f, false));
+    }catch(e){}
+  }
+
   // ---------- SSE ----------
   function connect(){
     const es = new EventSource('/api/v1/stream');
@@ -452,6 +498,7 @@
       if(m.event==='flow_new') upsert(m.summary, true);
       else if(m.event==='flow_update') upsert(m.summary, false);
       else if(m.event==='activity') onActivity(m.activity);
+      else if(m.event==='finding') addFinding(m.finding, true);
       else if(m.event==='intercept_paused'){ state.held.push({id:m.id, kind:'req', data:m.request}); renderIntercept(); }
       else if(m.event==='intercept_resp_paused'){ state.held.push({id:m.id, kind:'resp', data:m.response}); renderIntercept(); }
       else if(m.event==='intercept_resolved'){ state.held = state.held.filter(h=>h.id!==m.id); renderIntercept(); }
@@ -480,6 +527,7 @@
       ];
       renderIntercept();
     }catch(e){}
+    loadFindings();
   }
 
   // ---------- controls ----------
@@ -511,6 +559,9 @@
   });
   $('btnRules').onclick = () => { $('rules').classList.add('show'); loadRules(); };
   $('rulesClose').onclick = () => $('rules').classList.remove('show');
+  $('btnFindings').onclick = () => $('findings').classList.add('show');
+  $('findClose').onclick = () => $('findings').classList.remove('show');
+  $('findClear').onclick = async () => { await fetch('/api/v1/findings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({clear:true})}); loadFindings(); };
   $('raddbtn').onclick = addRule;
   $('rreplace').addEventListener('keydown', e => { if(e.key==='Enter') addRule(); });
   $('ailogClose').onclick = () => $('ailog').classList.remove('show');

@@ -152,6 +152,8 @@ pub enum FlowEvent {
     InterceptResolved { id: u64, action: String },
     /// Intercept toggles changed (`on` = requests, `responses` = responses).
     InterceptState { on: bool, responses: bool },
+    /// The passive scanner raised a finding.
+    Finding { finding: crate::scanner::Finding },
 }
 
 /// base64 (std, no padding issues) for byte bodies in JSON.
