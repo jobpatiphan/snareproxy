@@ -81,6 +81,7 @@
   pre.body{margin:0;padding:10px 12px;font-family:var(--mono);font-size:12px;white-space:pre-wrap;
     word-break:break-word;overflow:auto;flex:1;color:#c9d1d9;line-height:1.5}
   .kv{color:var(--dim)} .kv b{color:var(--info);font-weight:400}
+  .gql{color:var(--purple);font-weight:700} .gqlq{color:#c8a9ff}
   .empty{color:var(--dim);padding:26px;text-align:center;font-style:italic}
 
   /* AI log drawer */
@@ -530,12 +531,31 @@
 
   function headerBlock(hs){ return (hs||[]).map(([k,v])=>`<span class="kv"><b>${esc(k)}</b>: ${esc(v)}</span>`).join('\n'); }
 
+  function detectGraphQL(rq){
+    const body = b64dec(rq.body||'');
+    try{
+      const j = JSON.parse(body);
+      if(j && typeof j.query === 'string')
+        return { op:j.operationName||'', query:j.query, vars:j.variables?JSON.stringify(j.variables,null,2):'' };
+    }catch(e){}
+    if((rq.path||'').toLowerCase().includes('graphql') && body.trim())
+      return { op:'', query:body, vars:'' };
+    return null;
+  }
   function renderDetail(){
     const f = state.detail; if(!f) return;
     if(state.tab==='req'){
       const rq=f.request;
       const line = `${rq.method} ${rq.path}${rq.query?('?'+rq.query):''} ${rq.http_version}`;
-      $('dBody').innerHTML = esc(line)+'\n'+headerBlock(rq.headers)+'\n\n'+esc(b64dec(rq.body));
+      let html = esc(line)+'\n'+headerBlock(rq.headers)+'\n\n'+esc(b64dec(rq.body));
+      const gql = detectGraphQL(rq);
+      if(gql){
+        html = `<span class="gql">╭─ GraphQL${gql.op?(' · '+esc(gql.op)):''} ─╮</span>\n`+
+          `<span class="gqlq">${esc(gql.query)}</span>\n`+
+          (gql.vars?`<span class="gql">variables:</span>\n${esc(gql.vars)}\n`:'')+
+          `<span class="gql">╰────────────╯</span>\n\n`+html;
+      }
+      $('dBody').innerHTML = html;
     } else {
       const rs=f.response;
       if(!rs){ $('dBody').innerHTML='<span class="kv">no response captured</span>'; return; }
