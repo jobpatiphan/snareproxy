@@ -44,8 +44,9 @@ And it's **AI-native**: Snare exposes its *entire* toolset over the **Model Cont
 Proxy · Repeater · Intruder · **HTTPQL** query language · Match & Replace · Decoder / Comparer / Sequencer · Sitemap & Scope · Passive & Active Scanner (with **Nuclei** import) · WebSocket / gRPC / GraphQL tooling · JWT / OAuth kit · **Autonomous AI pentester** · session-handling & macros · full reporting (MD / HTML / PDF / **SARIF**) · team mode · WASM plugins.
 
 **📖 [Usage guide](docs/USAGE.md)** — how to use every tool + team mode. ·
-See the full **57-section architecture** in **[`docs/DESIGN.md`](docs/DESIGN.md)**
-and the **[team-mode design](docs/design/team-mode.md)**.
+See the full **57-section architecture** in **[`docs/DESIGN.md`](docs/DESIGN.md)**,
+the **[team-mode design](docs/design/team-mode.md)**, and the
+**[WASM plugins design](docs/design/wasm-plugins.md)**.
 
 ## Architecture at a glance
 
