@@ -9,8 +9,9 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 use snare_core::intercept::Intercept;
-use snare_core::rules::{Rules, RuleSpec};
+use snare_core::rules::{RuleSpec, Rules};
 use snare_core::scanner::Scanner;
+use snare_core::session::{MacroSpec, Macros, Vars};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Persisted {
@@ -20,6 +21,10 @@ pub struct Persisted {
     pub scope: Vec<String>,
     #[serde(default = "yes")]
     pub scanner_enabled: bool,
+    #[serde(default)]
+    pub vars: Vec<(String, String)>,
+    #[serde(default)]
+    pub macros: Vec<MacroSpec>,
 }
 fn yes() -> bool {
     true
@@ -39,7 +44,14 @@ pub fn load(path: &Path) -> Option<Persisted> {
 }
 
 /// Apply persisted settings onto the live coordinators at startup.
-pub fn apply(p: &Persisted, rules: &Rules, intercept: &Intercept, scanner: &Scanner) {
+pub fn apply(
+    p: &Persisted,
+    rules: &Rules,
+    intercept: &Intercept,
+    scanner: &Scanner,
+    vars: &Vars,
+    macros: &Macros,
+) {
     for r in &p.rules {
         // Re-add each rule; a bad regex (shouldn't happen — it was valid once) is
         // skipped rather than aborting startup.
@@ -50,14 +62,24 @@ pub fn apply(p: &Persisted, rules: &Rules, intercept: &Intercept, scanner: &Scan
     }
     intercept.set_scope(p.scope.clone());
     scanner.set_enabled(p.scanner_enabled);
+    vars.load(p.vars.clone());
+    macros.load(p.macros.clone());
 }
 
 /// Snapshot the current settings for writing to disk.
-pub fn snapshot(rules: &Rules, intercept: &Intercept, scanner: &Scanner) -> Persisted {
+pub fn snapshot(
+    rules: &Rules,
+    intercept: &Intercept,
+    scanner: &Scanner,
+    vars: &Vars,
+    macros: &Macros,
+) -> Persisted {
     Persisted {
         rules: rules.list(),
         scope: intercept.scope(),
         scanner_enabled: scanner.enabled(),
+        vars: vars.list(),
+        macros: macros.list(),
     }
 }
 

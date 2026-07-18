@@ -8,6 +8,7 @@ pub mod intercept;
 pub mod model;
 pub mod rules;
 pub mod scanner;
+pub mod session;
 pub mod store;
 pub mod ws;
 

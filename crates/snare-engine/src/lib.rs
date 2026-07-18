@@ -35,6 +35,7 @@ use snare_core::model::{
 };
 use snare_core::rules::Rules;
 use snare_core::scanner::Scanner;
+use snare_core::session::Vars;
 use snare_core::store::FlowStore;
 use snare_core::ws::WsLog;
 use tokio::sync::broadcast;
@@ -56,6 +57,7 @@ struct CaptureHandler {
     intercept: Arc<Intercept>,
     rules: Arc<Rules>,
     scanner: Arc<Scanner>,
+    vars: Arc<Vars>,
     /// Outstanding (flow_id, started, host) tuples, oldest first. Host lets
     /// response interception honour scope.
     pending: VecDeque<(i64, Instant, String)>,
@@ -217,8 +219,9 @@ impl HttpHandler for CaptureHandler {
             body: bytes.to_vec(),
         };
 
-        // Match & Replace: automatic regex rewrites before anything else sees it.
-        let mut dirty = self.rules.apply_request(&mut request);
+        // Match & Replace: automatic regex rewrites (with {{var}} injection)
+        // before anything else sees it.
+        let mut dirty = self.rules.apply_request(&mut request, &self.vars.snapshot());
 
         // Interactive intercept (§5.1): hold the request at the breakpoint until
         // the operator forwards (optionally edited) or drops it.
@@ -296,7 +299,7 @@ impl HttpHandler for CaptureHandler {
         };
 
         // Match & Replace on the response.
-        let mut dirty = self.rules.apply_response(&mut response);
+        let mut dirty = self.rules.apply_response(&mut response, &self.vars.snapshot());
 
         let entry = self.pending.pop_front();
         let host = entry.as_ref().map(|(_, _, h)| h.as_str()).unwrap_or("");
@@ -424,6 +427,7 @@ pub async fn run<F>(
     intercept: Arc<Intercept>,
     rules: Arc<Rules>,
     scanner: Arc<Scanner>,
+    vars: Arc<Vars>,
     wslog: Arc<WsLog>,
     shutdown: F,
 ) -> Result<()>
@@ -437,6 +441,7 @@ where
         intercept,
         rules,
         scanner,
+        vars,
         pending: VecDeque::new(),
     };
     let ws_handler = WsHandler { events, wslog };

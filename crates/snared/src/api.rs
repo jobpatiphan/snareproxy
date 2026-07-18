@@ -43,14 +43,24 @@ pub struct AppState {
     pub scanner: Arc<Scanner>,
     /// Captured WebSocket messages shared with the engine.
     pub wslog: Arc<snare_core::ws::WsLog>,
-    /// Where persisted settings (rules/scope/scanner) are written.
+    /// Session variables shared with the engine (for `{{var}}` injection).
+    pub vars: Arc<snare_core::session::Vars>,
+    /// Session macros.
+    pub macros: Arc<snare_core::session::Macros>,
+    /// Where persisted settings are written.
     pub config_path: std::path::PathBuf,
 }
 
 impl AppState {
-    /// Persist rules/scope/scanner after a mutation. Best-effort.
+    /// Persist rules/scope/scanner/vars/macros after a mutation. Best-effort.
     fn persist(&self) {
-        let snap = crate::config::snapshot(&self.rules, &self.intercept, &self.scanner);
+        let snap = crate::config::snapshot(
+            &self.rules,
+            &self.intercept,
+            &self.scanner,
+            &self.vars,
+            &self.macros,
+        );
         crate::config::save(&self.config_path, &snap);
     }
 }
@@ -89,6 +99,11 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/ws", get(ws_list).post(ws_clear))
         .route("/api/v1/report", get(report))
         .route("/api/v1/sequencer", post(sequencer_run))
+        .route("/api/v1/vars", get(vars_list).put(vars_set))
+        .route("/api/v1/vars/:name", axum::routing::delete(vars_delete))
+        .route("/api/v1/macros", get(macros_list).post(macros_add))
+        .route("/api/v1/macros/:id", axum::routing::delete(macros_delete))
+        .route("/api/v1/macros/:id/run", post(macros_run))
         .with_state(state)
 }
 
@@ -488,6 +503,91 @@ async fn active_scan_run(State(st): State<AppState>, Json(b): Json<ActiveScanBod
     };
     let results = active_scan::scan(&st.store, &st.events, &st.scanner, &base).await;
     Json(json!({ "results": results })).into_response()
+}
+
+// ---- Session handling: variables & macros ----
+
+async fn vars_list(State(st): State<AppState>) -> Response {
+    let obj: serde_json::Map<String, serde_json::Value> =
+        st.vars.list().into_iter().map(|(k, v)| (k, json!(v))).collect();
+    Json(obj).into_response()
+}
+
+#[derive(Debug, Deserialize)]
+pub struct VarBody {
+    pub name: String,
+    pub value: String,
+}
+
+async fn vars_set(State(st): State<AppState>, Json(b): Json<VarBody>) -> Response {
+    st.vars.set(&b.name, &b.value);
+    st.persist();
+    Json(json!({ "ok": true })).into_response()
+}
+
+async fn vars_delete(State(st): State<AppState>, Path(name): Path<String>) -> Response {
+    st.vars.remove(&name);
+    st.persist();
+    Json(json!({ "ok": true })).into_response()
+}
+
+async fn macros_list(State(st): State<AppState>) -> Response {
+    Json(st.macros.list()).into_response()
+}
+
+#[derive(Debug, Deserialize)]
+pub struct MacroBody {
+    #[serde(default)]
+    pub name: String,
+    pub method: String,
+    pub url: String,
+    #[serde(default)]
+    pub headers: Vec<Header>,
+    #[serde(default)]
+    pub body: String,
+    pub extract: String,
+    pub var: String,
+}
+
+async fn macros_add(State(st): State<AppState>, Json(b): Json<MacroBody>) -> Response {
+    let spec = snare_core::session::MacroSpec {
+        id: 0,
+        name: b.name,
+        method: b.method,
+        url: b.url,
+        headers: b.headers,
+        body: b.body,
+        extract: b.extract,
+        var: b.var,
+    };
+    let stored = st.macros.add(spec);
+    st.persist();
+    Json(stored).into_response()
+}
+
+async fn macros_delete(State(st): State<AppState>, Path(id): Path<u64>) -> Response {
+    if st.macros.remove(id) {
+        st.persist();
+        Json(json!({ "ok": true })).into_response()
+    } else {
+        (StatusCode::NOT_FOUND, Json(json!({ "error": "no such macro" }))).into_response()
+    }
+}
+
+/// Run a macro: send its request, extract, store the variable. Returns the value.
+async fn macros_run(State(st): State<AppState>, Path(id): Path<u64>) -> Response {
+    let Some(m) = st.macros.get(id) else {
+        return (StatusCode::NOT_FOUND, Json(json!({ "error": "no such macro" }))).into_response();
+    };
+    match crate::macros::run(&st.store, &st.events, &st.vars, &m).await {
+        Ok(Some(value)) => {
+            st.persist();
+            Json(json!({ "ok": true, "var": m.var, "value": value })).into_response()
+        }
+        Ok(None) => (StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({ "error": "extract pattern did not match the response" }))).into_response(),
+        Err(e) => err(e),
+    }
 }
 
 // ---- Sequencer ----

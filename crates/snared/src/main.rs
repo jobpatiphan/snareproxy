@@ -4,6 +4,7 @@ mod active_scan;
 mod api;
 mod config;
 mod intruder;
+mod macros;
 mod paths;
 mod repeater;
 mod sequencer;
@@ -145,11 +146,13 @@ async fn cmd_run(paths: &Paths, proxy_addr: SocketAddr, api_addr: SocketAddr) ->
     let rules = Arc::new(snare_core::rules::Rules::new());
     let scanner = Arc::new(snare_core::scanner::Scanner::new());
     let wslog = Arc::new(snare_core::ws::WsLog::new());
+    let vars = Arc::new(snare_core::session::Vars::new());
+    let session_macros = Arc::new(snare_core::session::Macros::new());
 
-    // Restore persisted rules / scope / scanner state from the last run.
+    // Restore persisted state (rules / scope / scanner / vars / macros).
     let config_path = paths.config_file();
     if let Some(persisted) = config::load(&config_path) {
-        config::apply(&persisted, &rules, &intercept, &scanner);
+        config::apply(&persisted, &rules, &intercept, &scanner, &vars, &session_macros);
         tracing::info!("restored {} rule(s) from {}", persisted.rules.len(), config_path.display());
     }
 
@@ -162,6 +165,8 @@ async fn cmd_run(paths: &Paths, proxy_addr: SocketAddr, api_addr: SocketAddr) ->
         rules: rules.clone(),
         scanner: scanner.clone(),
         wslog: wslog.clone(),
+        vars: vars.clone(),
+        macros: session_macros.clone(),
         config_path: config_path.clone(),
     });
     let listener = tokio::net::TcpListener::bind(api_addr)
@@ -188,7 +193,7 @@ async fn cmd_run(paths: &Paths, proxy_addr: SocketAddr, api_addr: SocketAddr) ->
     println!("  dashboard : http://{api_addr}/  ← open this to watch traffic live");
     println!("  press Ctrl-C to stop");
 
-    snare_engine::run(cfg, store_dyn, events, intercept, rules, scanner, wslog, async {
+    snare_engine::run(cfg, store_dyn, events, intercept, rules, scanner, vars, wslog, async {
         let _ = tokio::signal::ctrl_c().await;
     })
     .await?;

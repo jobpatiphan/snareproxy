@@ -118,6 +118,24 @@
   #rules .ritem .rp{color:var(--info);width:120px} #rules .ritem .rx{flex:1;color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   #rules .ritem .rtoggle{cursor:pointer} #rules .ritem .rdel{cursor:pointer;color:var(--err)}
   #rules .ritem.off{opacity:.45}
+  /* Session (reuses #rules box styling) */
+  #session{position:fixed;inset:0;background:rgba(2,4,8,.72);display:none;align-items:center;justify-content:center;z-index:20}
+  #session.show{display:flex}
+  #session .rbox{width:min(820px,94vw);max-height:86vh;background:var(--panel);border:1px solid var(--line);border-radius:10px;display:flex;flex-direction:column;overflow:hidden}
+  #session .rhead{display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--line);font-weight:700}
+  #session .rhead .grow{flex:1} #session .rhead .ihint{color:var(--dim);font-weight:400;font-size:12px} #session .rhead span[id]{cursor:pointer;color:var(--dim)}
+  #session code{background:var(--panel2);padding:1px 5px;border-radius:4px;color:var(--accent)}
+  #session .ssec{padding:8px 14px 2px;color:var(--accent2);font-weight:700;font-size:12px;font-family:var(--mono)}
+  #session .radd{display:flex;gap:6px;padding:6px 14px}
+  #session input,#session select{background:var(--panel2);border:1px solid var(--line);color:var(--fg);padding:5px 8px;border-radius:6px;font-family:var(--mono);font-size:12px}
+  #session .radd input:not([style*=width]){flex:1}
+  #session .radd button{background:var(--accent);color:#000;border:0;padding:5px 14px;border-radius:6px;cursor:pointer;font-weight:700}
+  #session .rerr{color:var(--err);font-family:var(--mono);font-size:12px;padding:0 14px} #session .rerr:not(:empty){padding:6px 14px}
+  #session .rlist{overflow:auto;padding:4px 0}
+  #session .sitem{display:flex;align-items:center;gap:10px;padding:5px 14px;border-bottom:1px solid var(--line);font-family:var(--mono);font-size:12px}
+  #session .sitem .k{color:var(--info)} #session .sitem .v{flex:1;color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #session .sitem .run{cursor:pointer;color:var(--ok);font-weight:700} #session .sitem .del{cursor:pointer;color:var(--err)}
+  #session .sitem .meta{flex:1;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   #btnFindings b, #btnWs b{color:var(--accent2)}
   #findings .freport{color:var(--info);text-decoration:none;font-weight:400;font-size:12px;margin-right:8px}
   #findings .freport:hover{text-decoration:underline}
@@ -253,6 +271,7 @@
   <button id="btnIntercept" title="Hold requests at a breakpoint to edit/drop them">⏸ Req: off</button>
   <button id="btnInterceptResp" title="Also hold responses">⏸ Resp: off</button>
   <button id="btnRules" title="Match &amp; Replace rules">⚙ M&amp;R</button>
+  <button id="btnSession" title="Session handling — variables &amp; macros">🔑 Session</button>
   <button id="btnFindings" title="Passive scan findings">⚠ Findings <b id="findCount"></b></button>
   <button id="btnMap" title="Sitemap — captured hosts &amp; paths">🗺 Sitemap</button>
   <button id="btnWs" title="Captured WebSocket messages">🔌 WS <b id="wsCount"></b></button>
@@ -381,6 +400,31 @@
       <a href="/api/v1/report?format=sarif" class="freport" title="SARIF export">SARIF ↓</a>
       <span id="findClear" title="clear" style="margin-right:10px">clear</span><span id="findClose">✕</span></div>
     <div class="flist" id="flist"></div>
+  </div>
+</div>
+
+<div id="session">
+  <div class="rbox">
+    <div class="rhead">🔑 Session handling <span class="ihint">run a macro to fetch a token → inject it with M&amp;R as <code>{{var}}</code></span>
+      <span class="grow"></span><span id="sessClose">✕</span></div>
+    <div class="ssec">Variables</div>
+    <div class="radd">
+      <input type="text" id="vname" placeholder="name" style="width:120px">
+      <input type="text" id="vval" placeholder="value">
+      <button id="vaddbtn">Set</button>
+    </div>
+    <div class="rlist" id="vlist" style="max-height:22vh"></div>
+    <div class="ssec">Macros <span class="ihint">run to refresh a variable</span></div>
+    <div class="radd" style="flex-wrap:wrap">
+      <input type="text" id="mname" placeholder="name" style="width:80px">
+      <select id="mmethod"><option>GET</option><option>POST</option><option>PUT</option></select>
+      <input type="text" id="murl" placeholder="url" style="min-width:160px">
+      <input type="text" id="mextract" placeholder="extract regex (group 1)" style="min-width:140px">
+      <input type="text" id="mvar" placeholder="→ var" style="width:72px">
+      <button id="maddbtn">Add</button>
+    </div>
+    <div class="rerr" id="serr"></div>
+    <div class="rlist" id="mlist" style="max-height:24vh"></div>
   </div>
 </div>
 
@@ -663,6 +707,56 @@
     const b = $('btnIntercept'); b.textContent = on ? '⏸ Req: ON' : '⏸ Req: off'; b.classList.toggle('on', on);
     const r = $('btnInterceptResp'); r.textContent = responses ? '⏸ Resp: ON' : '⏸ Resp: off'; r.classList.toggle('on', responses);
   }
+
+  // ---------- Session handling ----------
+  async function loadVars(){
+    try{
+      const v = await (await fetch('/api/v1/vars')).json();
+      const el = $('vlist'); const keys = Object.keys(v);
+      el.innerHTML = keys.length ? '' : '<div class="sitem" style="opacity:.5">no variables</div>';
+      for(const k of keys){
+        const d = document.createElement('div'); d.className = 'sitem';
+        d.innerHTML = `<span class="k">${esc(k)}</span> = <span class="v">${esc(v[k])}</span><span class="del" title="delete">🗑</span>`;
+        d.querySelector('.del').onclick = async () => { await fetch('/api/v1/vars/'+encodeURIComponent(k),{method:'DELETE'}); loadVars(); };
+        el.appendChild(d);
+      }
+    }catch(e){}
+  }
+  async function setVar(){
+    const name = $('vname').value.trim(); if(!name) return;
+    await fetch('/api/v1/vars',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,value:$('vval').value})});
+    $('vname').value=''; $('vval').value=''; loadVars();
+  }
+  async function loadMacros(){
+    try{
+      const list = await (await fetch('/api/v1/macros')).json();
+      const el = $('mlist');
+      el.innerHTML = list.length ? '' : '<div class="sitem" style="opacity:.5">no macros</div>';
+      for(const m of list){
+        const d = document.createElement('div'); d.className = 'sitem';
+        d.innerHTML = `<span class="k">${esc(m.name||'macro')}</span>`+
+          `<span class="meta">${esc(m.method)} ${esc(m.url)} → <b>${esc(m.var)}</b></span>`+
+          `<span class="run" title="run">▶ run</span><span class="del" title="delete">🗑</span>`;
+        d.querySelector('.run').onclick = async (ev) => {
+          ev.target.textContent = '…';
+          const r = await (await fetch(`/api/v1/macros/${m.id}/run`,{method:'POST'})).json();
+          ev.target.textContent = r.ok ? ('✓ '+r.var) : '✗';
+          loadVars(); setTimeout(()=>{ev.target.textContent='▶ run';}, 2000);
+        };
+        d.querySelector('.del').onclick = async () => { await fetch(`/api/v1/macros/${m.id}`,{method:'DELETE'}); loadMacros(); };
+        el.appendChild(d);
+      }
+    }catch(e){}
+  }
+  async function addMacro(){
+    $('serr').textContent='';
+    const body = { name:$('mname').value, method:$('mmethod').value, url:$('murl').value, extract:$('mextract').value, var:$('mvar').value };
+    if(!body.url || !body.extract || !body.var){ $('serr').textContent='url, extract and var required'; return; }
+    const r = await fetch('/api/v1/macros',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    if(r.ok){ $('mname').value=$('murl').value=$('mextract').value=$('mvar').value=''; loadMacros(); }
+    else { $('serr').textContent='failed to add macro'; }
+  }
+  function loadSession(){ loadVars(); loadMacros(); }
 
   // ---------- Match & Replace ----------
   async function loadRules(){
@@ -976,6 +1070,11 @@
   });
   $('btnRules').onclick = () => { $('rules').classList.add('show'); loadRules(); };
   $('rulesClose').onclick = () => $('rules').classList.remove('show');
+  $('btnSession').onclick = () => { $('session').classList.add('show'); loadSession(); };
+  $('sessClose').onclick = () => $('session').classList.remove('show');
+  $('vaddbtn').onclick = setVar;
+  $('vval').addEventListener('keydown', e => { if(e.key==='Enter') setVar(); });
+  $('maddbtn').onclick = addMacro;
   $('rpsend').onclick = rpSend;
   $('rpClose').onclick = () => $('repeater').classList.remove('show');
   $('rpreq').addEventListener('keydown', e => { if((e.ctrlKey||e.metaKey)&&e.key==='Enter'){ e.preventDefault(); rpSend(); }});
