@@ -32,6 +32,7 @@
   header button.active{background:var(--accent);color:#000;border-color:var(--accent);font-weight:600}
   .stat{color:var(--dim);font-family:var(--mono);font-size:12px}
   .stat b{color:var(--fg)}
+  .ops{color:var(--ok);font-size:12px} .ops:empty{display:none}
 
   /* AI activity banner */
   #ai{display:none;align-items:center;gap:12px;padding:9px 14px;background:linear-gradient(90deg,#2d1b4e,#161b22);
@@ -275,6 +276,7 @@
   <span class="dot" id="dot"></span>
   <span class="logo">🪤 Snare <small>· Live</small></span>
   <span class="stat"><b id="count">0</b> flows</span>
+  <span class="ops" id="ops" title="operators online"></span>
   <span class="grow"></span>
   <input type="text" id="filter" placeholder="filter — e.g. status:4 host:api !mime:json" autocomplete="off" title="HTTPQL: field:value (status/host/path/method/mime/source), ! negates, space = AND">
   <input type="text" id="scope" class="scope" placeholder="scope: host,host…" title="Limit intercept to these hosts (comma-separated; empty = all)" autocomplete="off">
@@ -1031,6 +1033,26 @@
     }catch(e){}
   }
 
+  // ---------- Team: live config reload + presence ----------
+  function onConfigChanged(kind){
+    // Reload a panel only if it's currently open (another operator changed it).
+    if(kind==='rules' && $('rules').classList.contains('show')) loadRules();
+    if((kind==='vars'||kind==='macros') && $('session').classList.contains('show')) loadSession();
+    if(kind==='scope'){
+      fetch('/api/v1/intercept').then(r=>r.json()).then(s=>{ $('scope').value=(s.scope||[]).join(', '); }).catch(()=>{});
+    }
+  }
+  async function loadOperators(){
+    try{
+      const ops = await (await fetch('/api/v1/operators')).json();
+      $('ops').textContent = ops.length ? ('👤 ' + ops.join(', ')) : '';
+    }catch(e){ $('ops').textContent = ''; }
+  }
+  function flashOps(msg){
+    const el = $('ops'); const prev = el.textContent;
+    el.textContent = '👤 ' + msg; setTimeout(loadOperators, 2500);
+  }
+
   // ---------- SSE ----------
   function connect(){
     const es = new EventSource('/api/v1/stream' + (authToken ? ('?token=' + encodeURIComponent(authToken)) : ''));
@@ -1043,6 +1065,8 @@
       else if(m.event==='activity') onActivity(m.activity);
       else if(m.event==='finding') addFinding(m.finding, true);
       else if(m.event==='ws_message') addWs(m.msg, true);
+      else if(m.event==='config_changed') onConfigChanged(m.kind);
+      else if(m.event==='presence'){ loadOperators(); if(m.status==='join') flashOps(m.operator+' joined'); }
       else if(m.event==='intercept_paused'){ state.held.push({id:m.id, kind:'req', data:m.request}); renderIntercept(); }
       else if(m.event==='intercept_resp_paused'){ state.held.push({id:m.id, kind:'resp', data:m.response}); renderIntercept(); }
       else if(m.event==='intercept_resolved'){ state.held = state.held.filter(h=>h.id!==m.id); renderIntercept(); }
@@ -1143,7 +1167,10 @@
   });
 
   // ---------- Boot (auth-gated) ----------
-  function start(){ initial(); connect(); }
+  function start(){
+    initial(); connect();
+    if(authToken){ loadOperators(); setInterval(loadOperators, 15000); } // team mode
+  }
   async function doLogin(){
     $('lerr').textContent = '';
     try{

@@ -156,6 +156,11 @@ pub enum FlowEvent {
     Finding { finding: crate::scanner::Finding },
     /// A WebSocket message was captured.
     WsMessage { msg: crate::ws::WsMessage },
+    /// Shared config changed (team mode) — clients reload the given kind
+    /// ("rules" | "scope" | "vars" | "macros" | "scanner").
+    ConfigChanged { kind: String },
+    /// An operator joined or left (team mode); `status` = "join" | "leave".
+    Presence { operator: String, status: String },
 }
 
 /// Base64-encode bytes (used for binary WebSocket frames, etc.).

@@ -137,6 +137,10 @@ impl App {
                     let arrow = if msg.direction == "send" { "▲" } else { "▼" };
                     self.activity = Some((format!("🔌 {arrow} {} {}", msg.host, msg.kind), Instant::now()));
                 }
+                FlowEvent::Presence { operator, status } => {
+                    self.activity = Some((format!("👤 {operator} {status}"), Instant::now()));
+                }
+                FlowEvent::ConfigChanged { .. } => {}
             }
         }
         self.status = format!("{} flows", self.flows.len());

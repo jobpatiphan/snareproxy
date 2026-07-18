@@ -15,9 +15,13 @@ pub struct Operator {
     pub display_name: String,
 }
 
+/// How long since a session's last activity before the operator is "offline".
+const PRESENCE_TIMEOUT_MS: i64 = 30_000;
+
 pub struct Auth {
     project_token: Option<String>,
-    sessions: Mutex<HashMap<String, Operator>>,
+    /// session token -> (operator, last-seen unix millis)
+    sessions: Mutex<HashMap<String, (Operator, i64)>>,
 }
 
 impl Auth {
@@ -52,12 +56,33 @@ impl Auth {
             display_name,
         };
         let token = rand_hex(24);
-        self.sessions.lock().unwrap().insert(token.clone(), op.clone());
+        self.sessions
+            .lock()
+            .unwrap()
+            .insert(token.clone(), (op.clone(), snare_core::now_millis()));
         (token, op)
     }
 
+    /// Verify a session token and refresh its last-seen (presence heartbeat).
     pub fn verify_session(&self, token: &str) -> Option<Operator> {
-        self.sessions.lock().unwrap().get(token).cloned()
+        let mut g = self.sessions.lock().unwrap();
+        g.get_mut(token).map(|(op, seen)| {
+            *seen = snare_core::now_millis();
+            op.clone()
+        })
+    }
+
+    /// Operators seen within the presence window, newest first.
+    pub fn online(&self) -> Vec<String> {
+        let cutoff = snare_core::now_millis() - PRESENCE_TIMEOUT_MS;
+        let g = self.sessions.lock().unwrap();
+        let mut ops: Vec<(&Operator, i64)> = g
+            .values()
+            .filter(|(_, seen)| *seen >= cutoff)
+            .map(|(op, seen)| (op, *seen))
+            .collect();
+        ops.sort_by_key(|(_, seen)| std::cmp::Reverse(*seen));
+        ops.into_iter().map(|(op, _)| op.display_name.clone()).collect()
     }
 }
 

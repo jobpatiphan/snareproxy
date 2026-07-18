@@ -66,6 +66,12 @@ impl AppState {
         );
         crate::config::save(&self.config_path, &snap);
     }
+
+    /// Persist and tell other operators to reload this config kind (team mode).
+    fn config_changed(&self, kind: &str) {
+        self.persist();
+        let _ = self.events.send(FlowEvent::ConfigChanged { kind: kind.into() });
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -82,6 +88,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/health", get(health))
         .route("/api/v1/team/join", post(team_join))
         .route("/api/v1/team/whoami", get(team_whoami))
+        .route("/api/v1/operators", get(operators_list))
         .route("/api/v1/stats", get(stats))
         .route("/api/v1/flows", get(list_flows))
         .route("/api/v1/flows/:id", get(get_flow))
@@ -176,13 +183,9 @@ async fn team_join(State(st): State<AppState>, Json(b): Json<JoinBody>) -> Respo
         return (StatusCode::UNAUTHORIZED, Json(json!({ "error": "invalid project token" }))).into_response();
     }
     let (token, op) = st.auth.create_session(b.display_name);
-    let _ = st.events.send(FlowEvent::Activity {
-        activity: Activity {
-            ts: snare_core::now_millis(),
-            agent: op.display_name.clone(),
-            tool: "join".into(),
-            detail: "joined the engagement".into(),
-        },
+    let _ = st.events.send(FlowEvent::Presence {
+        operator: op.display_name.clone(),
+        status: "join".into(),
     });
     Json(json!({
         "auth": true,
@@ -191,6 +194,11 @@ async fn team_join(State(st): State<AppState>, Json(b): Json<JoinBody>) -> Respo
         "display_name": op.display_name,
     }))
     .into_response()
+}
+
+/// Operators currently online (seen within the presence window).
+async fn operators_list(State(st): State<AppState>) -> Response {
+    Json(st.auth.online()).into_response()
 }
 
 /// Whether auth is required, and (if a valid token is supplied) who you are.
@@ -368,7 +376,7 @@ pub struct ScopeBody {
 /// Set the intercept scope (host substrings; empty = every host).
 async fn intercept_scope(State(st): State<AppState>, Json(b): Json<ScopeBody>) -> Response {
     st.intercept.set_scope(b.hosts);
-    st.persist();
+    st.config_changed("scope");
     Json(json!({ "scope": st.intercept.scope() })).into_response()
 }
 
@@ -479,7 +487,7 @@ fn yes() -> bool {
 async fn rules_add(State(st): State<AppState>, Json(b): Json<RuleBody>) -> Response {
     match st.rules.add(b.name, b.part, b.pattern, b.replace, b.enabled) {
         Ok(spec) => {
-            st.persist();
+            st.config_changed("rules");
             Json(spec).into_response()
         }
         Err(e) => (StatusCode::BAD_REQUEST, Json(json!({ "error": e }))).into_response(),
@@ -488,7 +496,7 @@ async fn rules_add(State(st): State<AppState>, Json(b): Json<RuleBody>) -> Respo
 
 async fn rules_delete(State(st): State<AppState>, Path(id): Path<u64>) -> Response {
     if st.rules.remove(id) {
-        st.persist();
+        st.config_changed("rules");
         Json(json!({ "ok": true })).into_response()
     } else {
         (StatusCode::NOT_FOUND, Json(json!({ "error": "no such rule" }))).into_response()
@@ -506,7 +514,7 @@ async fn rules_toggle(
     Json(b): Json<RuleToggle>,
 ) -> Response {
     if st.rules.set_enabled(id, b.on) {
-        st.persist();
+        st.config_changed("rules");
         Json(json!({ "ok": true })).into_response()
     } else {
         (StatusCode::NOT_FOUND, Json(json!({ "error": "no such rule" }))).into_response()
@@ -580,7 +588,7 @@ async fn scanner_toggle(State(st): State<AppState>, Json(b): Json<ScannerToggle>
     if b.clear {
         st.scanner.clear();
     }
-    st.persist();
+    st.config_changed("scanner");
     Json(json!({ "on": st.scanner.enabled() })).into_response()
 }
 
@@ -615,13 +623,13 @@ pub struct VarBody {
 
 async fn vars_set(State(st): State<AppState>, Json(b): Json<VarBody>) -> Response {
     st.vars.set(&b.name, &b.value);
-    st.persist();
+    st.config_changed("vars");
     Json(json!({ "ok": true })).into_response()
 }
 
 async fn vars_delete(State(st): State<AppState>, Path(name): Path<String>) -> Response {
     st.vars.remove(&name);
-    st.persist();
+    st.config_changed("vars");
     Json(json!({ "ok": true })).into_response()
 }
 
@@ -655,13 +663,13 @@ async fn macros_add(State(st): State<AppState>, Json(b): Json<MacroBody>) -> Res
         var: b.var,
     };
     let stored = st.macros.add(spec);
-    st.persist();
+    st.config_changed("macros");
     Json(stored).into_response()
 }
 
 async fn macros_delete(State(st): State<AppState>, Path(id): Path<u64>) -> Response {
     if st.macros.remove(id) {
-        st.persist();
+        st.config_changed("macros");
         Json(json!({ "ok": true })).into_response()
     } else {
         (StatusCode::NOT_FOUND, Json(json!({ "error": "no such macro" }))).into_response()
@@ -675,7 +683,7 @@ async fn macros_run(State(st): State<AppState>, Path(id): Path<u64>) -> Response
     };
     match crate::macros::run(&st.store, &st.events, &st.vars, &m).await {
         Ok(Some(value)) => {
-            st.persist();
+            st.config_changed("vars");
             Json(json!({ "ok": true, "var": m.var, "value": value })).into_response()
         }
         Ok(None) => (StatusCode::UNPROCESSABLE_ENTITY,
