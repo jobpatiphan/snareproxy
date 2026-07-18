@@ -142,6 +142,16 @@
   #decoder textarea{margin:10px 14px;height:22vh;background:#0a0e14;color:#e6edf3;border:1px solid var(--line);
     border-radius:6px;padding:10px;font-family:var(--mono);font-size:12px;resize:none;outline:none}
   #decoder textarea:last-child{margin-top:0}
+  /* Repeater + Intruder share modal styling */
+  #repeater{position:fixed;inset:0;background:rgba(2,4,8,.72);display:none;align-items:center;justify-content:center;z-index:20}
+  #repeater.show{display:flex}
+  #repeater .ibox{width:min(900px,94vw);max-height:88vh;background:var(--panel);border:1px solid var(--line);border-radius:10px;display:flex;flex-direction:column;overflow:hidden}
+  #repeater .rhead{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--line);font-weight:700}
+  #repeater .rhead .grow{flex:1} #repeater .rhead .ihint{color:var(--dim);font-weight:400;font-size:12px}
+  #repeater .rhead button{background:var(--accent);color:#000;border:0;padding:5px 14px;border-radius:6px;cursor:pointer;font-weight:700}
+  #repeater .rhead span[id]{cursor:pointer;color:var(--dim)}
+  #repeater .icols{display:flex;gap:10px;padding:10px 14px}
+  #repeater textarea{flex:1;height:60vh;background:#0a0e14;color:#e6edf3;border:1px solid var(--line);border-radius:6px;padding:10px;font-family:var(--mono);font-size:12px;resize:none;outline:none}
   /* Intruder */
   #intruder{position:fixed;inset:0;background:rgba(2,4,8,.72);display:none;align-items:center;justify-content:center;z-index:20}
   #intruder.show{display:flex}
@@ -184,7 +194,7 @@
   <span class="logo">🪤 Snare <small>· Live</small></span>
   <span class="stat"><b id="count">0</b> flows</span>
   <span class="grow"></span>
-  <input type="text" id="filter" placeholder="filter host / path / method…" autocomplete="off">
+  <input type="text" id="filter" placeholder="filter — e.g. status:4 host:api !mime:json" autocomplete="off" title="HTTPQL: field:value (status/host/path/method/mime/source), ! negates, space = AND">
   <input type="text" id="scope" class="scope" placeholder="scope: host,host…" title="Limit intercept to these hosts (comma-separated; empty = all)" autocomplete="off">
   <button id="btnIntercept" title="Hold requests at a breakpoint to edit/drop them">⏸ Req: off</button>
   <button id="btnInterceptResp" title="Also hold responses">⏸ Resp: off</button>
@@ -227,6 +237,17 @@
 <div id="ailog">
   <div class="h"><span>🤖</span> AI activity <span class="grow"></span><span id="ailogClose">✕</span></div>
   <div class="list" id="ailogList"></div>
+</div>
+
+<div id="repeater">
+  <div class="ibox">
+    <div class="rhead">✎ Repeater <span class="ihint">edit the request and send</span>
+      <span class="grow"></span><button id="rpsend">Send ▶</button><span id="rpClose">✕</span></div>
+    <div class="icols">
+      <textarea id="rpreq" spellcheck="false" placeholder="request"></textarea>
+      <textarea id="rpresp" spellcheck="false" readonly placeholder="response"></textarea>
+    </div>
+  </div>
 </div>
 
 <div id="intruder">
@@ -303,7 +324,7 @@
   const $ = id => document.getElementById(id);
   const rows = $('rows'), countEl = $('count'), dot = $('dot');
   const state = { flows: new Map(), order: [], sel: null, detail: null, tab: 'req',
-                  auto: true, notify: false, filter: '', intercept: false, interceptResp: false, held: [], findings: [] };
+                  auto: true, notify: false, query: [], intercept: false, interceptResp: false, held: [], findings: [] };
 
   // ---------- helpers ----------
   const esc = s => (s==null?'':String(s)).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
@@ -315,8 +336,36 @@
     try{return new TextDecoder('utf-8',{fatal:false}).decode(u);}catch(e){return bin;} }catch(e){return '';} };
 
   // ---------- flow rendering ----------
-  function matches(f){ if(!state.filter) return true;
-    return (f.method+' '+f.host+f.path+' '+(f.status||'')).toLowerCase().includes(state.filter); }
+  // Mini HTTPQL: space-separated terms (all must match). `field:value`
+  // (status/host/path/method/mime/source) or a bare word (whole-row). Prefix `!`
+  // negates. e.g. `status:4 host:api !mime:json`
+  function parseQuery(q){
+    return q.trim().split(/\s+/).filter(Boolean).map(term => {
+      let neg = false;
+      if(term[0]==='!'){ neg = true; term = term.slice(1); }
+      const ci = term.indexOf(':');
+      return ci>0 ? {neg, field:term.slice(0,ci).toLowerCase(), val:term.slice(ci+1).toLowerCase()}
+                  : {neg, field:'*', val:term.toLowerCase()};
+    });
+  }
+  function matchTerm(f, t){
+    let hay;
+    switch(t.field){
+      case 'status': hay = String(f.status||''); break;
+      case 'host': hay = (f.host||'').toLowerCase(); break;
+      case 'path': hay = (f.path||'').toLowerCase(); break;
+      case 'method': hay = (f.method||'').toLowerCase(); break;
+      case 'mime': case 'type': hay = (f.mime||'').toLowerCase(); break;
+      case 'source': case 'src': hay = (f.source||'').toLowerCase(); break;
+      default: hay = (f.method+' '+f.host+f.path+' '+(f.status||'')+' '+(f.mime||'')).toLowerCase();
+    }
+    const ok = hay.includes(t.val);
+    return t.neg ? !ok : ok;
+  }
+  function matches(f){
+    if(!state.query || !state.query.length) return true;
+    return state.query.every(t => matchTerm(f, t));
+  }
 
   function rowHtml(f){
     const sc = f.status ? 's'+String(f.status)[0] : 's0';
@@ -359,11 +408,13 @@
       const r = await fetch('/api/v1/flows/'+id); state.detail = await r.json();
       const f = state.detail;
       const url = f.request.url ? f.request.url : (f.request.scheme+'://'+f.request.host+f.request.path);
-      $('dHead').innerHTML = `<button id="resend" title="Resend this request (Repeater)">↻ Resend</button>`+
+      $('dHead').innerHTML = `<button id="resend" title="Resend as-is (Repeater)">↻ Resend</button>`+
+        `<button id="editrep" title="Edit &amp; send (Repeater)">✎ Edit</button>`+
         `<button id="tointruder" title="Send to Intruder (fuzz)">⚔ Intruder</button>`+
         `<span class="m m-${esc(f.request.method)}">${esc(f.request.method)}</span> `+
         `<span class="url">${esc(url)}</span>`;
       $('resend').onclick = () => resend(id);
+      $('editrep').onclick = () => openRepeater();
       $('tointruder').onclick = () => openIntruder();
       renderDetail();
     }catch(e){ $('dHead').innerHTML='<span class="s5">failed to load</span>'; }
@@ -526,6 +577,30 @@
     else { const e = await r.json().catch(()=>({})); $('rerr').textContent = 'bad regex: '+(e.error||r.status); }
   }
 
+  // ---------- Repeater (edit & send) ----------
+  function openRepeater(){
+    const f = state.detail; if(!f) return;
+    $('rpreq').value = reqToText(f.request);
+    $('rpresp').value = '';
+    $('repeater').classList.add('show');
+    $('rpreq').focus();
+  }
+  async function rpSend(){
+    const f = state.detail; if(!f) return;
+    const p = textToReq($('rpreq').value);
+    const url = flowUrl(f.request, p.path, p.query);
+    $('rpresp').value = 'sending…';
+    try{
+      const flow = await (await fetch('/api/v1/repeater',{method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({method:p.method, url, headers:p.headers, body:p.body})})).json();
+      const r = flow.response;
+      $('rpresp').value = r
+        ? `${r.http_version} ${r.status}\n`+(r.headers||[]).map(([k,v])=>`${k}: ${v}`).join('\n')+'\n\n'+b64dec(r.body||'')
+        : 'no response';
+    }catch(e){ $('rpresp').value = 'error: '+e.message; }
+  }
+
   // ---------- Intruder ----------
   function flowUrl(r, path, query){
     const defp = (r.scheme==='https'&&r.port===443)||(r.scheme==='http'&&r.port===80);
@@ -647,7 +722,7 @@
 
   // ---------- controls ----------
   $('filter').addEventListener('input', e => {
-    state.filter = e.target.value.trim().toLowerCase();
+    state.query = parseQuery(e.target.value);
     state.flows.forEach(({f,el}) => el.style.display = matches(f)?'':'none');
   });
   $('btnAuto').onclick = e => { state.auto=!state.auto; e.target.classList.toggle('active',state.auto); };
@@ -674,6 +749,9 @@
   });
   $('btnRules').onclick = () => { $('rules').classList.add('show'); loadRules(); };
   $('rulesClose').onclick = () => $('rules').classList.remove('show');
+  $('rpsend').onclick = rpSend;
+  $('rpClose').onclick = () => $('repeater').classList.remove('show');
+  $('rpreq').addEventListener('keydown', e => { if((e.ctrlKey||e.metaKey)&&e.key==='Enter'){ e.preventDefault(); rpSend(); }});
   $('irun').onclick = runIntruder;
   $('intruderClose').onclick = () => $('intruder').classList.remove('show');
   $('btnDecoder').onclick = () => $('decoder').classList.add('show');
