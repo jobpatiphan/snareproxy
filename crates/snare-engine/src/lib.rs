@@ -18,11 +18,15 @@ use anyhow::{Context, Result};
 use http_body_util::{BodyExt, Full};
 use hudsucker::{
     certificate_authority::RcgenAuthority,
-    hyper::{Request, Response},
+    hyper::{
+        header::{HeaderName, HeaderValue},
+        Request, Response, StatusCode, Uri,
+    },
     rcgen::{CertificateParams, KeyPair},
     rustls::crypto::aws_lc_rs,
     Body, HttpContext, HttpHandler, Proxy, RequestOrResponse,
 };
+use snare_core::intercept::{Decision, Intercept};
 use snare_core::model::{
     FlowEvent, FlowSummary, Header, HttpRequest, HttpResponse, Source,
 };
@@ -43,6 +47,7 @@ pub struct EngineConfig {
 struct CaptureHandler {
     store: Arc<dyn FlowStore>,
     events: broadcast::Sender<FlowEvent>,
+    intercept: Arc<Intercept>,
     /// Outstanding (flow_id, started) pairs, oldest first.
     pending: VecDeque<(i64, Instant)>,
 }
@@ -56,6 +61,47 @@ fn to_headers(map: &hudsucker::hyper::HeaderMap) -> Vec<Header> {
             )
         })
         .collect()
+}
+
+/// Apply an (edited) request model back onto the outgoing wire request. Used
+/// only after an intercept forward; the MITM'd connection already targets the
+/// host, so we keep origin-form and let hyper recompute Content-Length.
+fn rebuild_parts(parts: &mut hudsucker::hyper::http::request::Parts, req: &HttpRequest) {
+    if let Ok(m) = hudsucker::hyper::Method::from_bytes(req.method.as_bytes()) {
+        parts.method = m;
+    }
+    // Preserve the original scheme/authority (hudsucker routes on them); only
+    // swap the path+query so an edited path still reaches the right upstream.
+    let mut pq = req.path.clone();
+    if let Some(q) = &req.query {
+        pq.push('?');
+        pq.push_str(q);
+    }
+    if let Ok(pq) = pq.parse::<hudsucker::hyper::http::uri::PathAndQuery>() {
+        let mut builder = Uri::builder();
+        if let Some(scheme) = parts.uri.scheme() {
+            builder = builder.scheme(scheme.clone());
+        }
+        if let Some(authority) = parts.uri.authority() {
+            builder = builder.authority(authority.clone());
+        }
+        if let Ok(uri) = builder.path_and_query(pq).build() {
+            parts.uri = uri;
+        }
+    }
+    let mut headers = hudsucker::hyper::HeaderMap::new();
+    for (k, v) in &req.headers {
+        if k.eq_ignore_ascii_case("content-length") {
+            continue; // hyper sets this from the actual body
+        }
+        if let (Ok(name), Ok(val)) = (
+            HeaderName::from_bytes(k.as_bytes()),
+            HeaderValue::from_str(v),
+        ) {
+            headers.append(name, val);
+        }
+    }
+    parts.headers = headers;
 }
 
 fn summary_of_request(id: i64, ts: i64, req: &HttpRequest) -> FlowSummary {
@@ -88,7 +134,7 @@ impl HttpHandler for CaptureHandler {
         if req.method() == hudsucker::hyper::Method::CONNECT {
             return req.into();
         }
-        let (parts, body) = req.into_parts();
+        let (mut parts, body) = req.into_parts();
         let bytes = match body.collect().await {
             Ok(b) => b.to_bytes(),
             Err(_) => {
@@ -119,7 +165,7 @@ impl HttpHandler for CaptureHandler {
             .port_u16()
             .unwrap_or(if scheme == "http" { 80 } else { 443 });
 
-        let request = HttpRequest {
+        let mut request = HttpRequest {
             method: parts.method.as_str().to_string(),
             scheme,
             host,
@@ -130,6 +176,42 @@ impl HttpHandler for CaptureHandler {
             headers: to_headers(&parts.headers),
             body: bytes.to_vec(),
         };
+
+        // Interactive intercept (§5.1): hold the request at the breakpoint until
+        // the operator forwards (optionally edited) or drops it.
+        let mut forwarded_bytes = bytes;
+        if self.intercept.enabled() {
+            let (iid, rx) = self.intercept.register(request.clone());
+            let _ = self.events.send(FlowEvent::InterceptPaused {
+                id: iid,
+                request: request.clone(),
+            });
+            match rx.await {
+                Ok(Decision::Drop) => {
+                    let _ = self.events.send(FlowEvent::InterceptResolved {
+                        id: iid,
+                        action: "drop".into(),
+                    });
+                    let resp = Response::builder()
+                        .status(StatusCode::FORBIDDEN)
+                        .body(Body::from(Full::new(bytes::Bytes::from_static(
+                            b"dropped by Snare",
+                        ))))
+                        .expect("static drop response");
+                    return resp.into();
+                }
+                Ok(Decision::Forward(edited)) => {
+                    let _ = self.events.send(FlowEvent::InterceptResolved {
+                        id: iid,
+                        action: "forward".into(),
+                    });
+                    request = *edited;
+                    forwarded_bytes = bytes::Bytes::from(request.body.clone());
+                    rebuild_parts(&mut parts, &request);
+                }
+                Err(_) => {} // decision channel dropped — forward as captured
+            }
+        }
 
         let ts = snare_core::now_millis();
         match self.store.insert_request(ts, Source::Proxy, &request) {
@@ -142,7 +224,7 @@ impl HttpHandler for CaptureHandler {
             Err(e) => tracing::warn!("store insert_request failed: {e:#}"),
         }
 
-        Request::from_parts(parts, Body::from(Full::new(bytes))).into()
+        Request::from_parts(parts, Body::from(Full::new(forwarded_bytes))).into()
     }
 
     async fn handle_response(
@@ -201,6 +283,7 @@ pub async fn run<F>(
     cfg: EngineConfig,
     store: Arc<dyn FlowStore>,
     events: broadcast::Sender<FlowEvent>,
+    intercept: Arc<Intercept>,
     shutdown: F,
 ) -> Result<()>
 where
@@ -210,6 +293,7 @@ where
     let handler = CaptureHandler {
         store,
         events,
+        intercept,
         pending: VecDeque::new(),
     };
 

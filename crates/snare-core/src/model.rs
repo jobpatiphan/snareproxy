@@ -144,6 +144,12 @@ pub enum FlowEvent {
     FlowUpdate { summary: FlowSummary },
     /// An AI agent invoked a tool against Snare.
     Activity { activity: Activity },
+    /// A request is held at the intercept breakpoint, awaiting a decision.
+    InterceptPaused { id: u64, request: HttpRequest },
+    /// A held request was forwarded or dropped (`action` = "forward" | "drop").
+    InterceptResolved { id: u64, action: String },
+    /// Intercept was toggled on/off.
+    InterceptState { on: bool },
 }
 
 /// base64 (std, no padding issues) for byte bodies in JSON.

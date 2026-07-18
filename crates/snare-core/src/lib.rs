@@ -4,6 +4,7 @@
 //! All business logic lives here so the daemon, TUI, MCP server, and future
 //! web/desktop frontends stay thin.
 
+pub mod intercept;
 pub mod model;
 pub mod store;
 

@@ -111,6 +111,12 @@ impl App {
                     };
                     self.activity = Some((label, Instant::now()));
                 }
+                // Intercept is driven from the Web UI for now; surface a hint in
+                // the TUI status line but don't handle it here.
+                FlowEvent::InterceptPaused { .. } => {
+                    self.activity = Some(("⏸ request held (use Web UI)".into(), Instant::now()));
+                }
+                FlowEvent::InterceptResolved { .. } | FlowEvent::InterceptState { .. } => {}
             }
         }
         self.status = format!("{} flows", self.flows.len());

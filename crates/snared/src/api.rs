@@ -20,6 +20,7 @@ use axum::{
 };
 use serde::Deserialize;
 use serde_json::json;
+use snare_core::intercept::{Edit, Intercept};
 use snare_core::model::{Activity, FlowEvent, Header};
 use snare_core::store::{FlowQuery, FlowStore};
 use tokio::sync::broadcast;
@@ -32,6 +33,8 @@ pub struct AppState {
     pub store: Arc<dyn FlowStore>,
     /// Live event bus shared with the proxy engine and the activity sink.
     pub events: broadcast::Sender<FlowEvent>,
+    /// Interactive intercept breakpoint shared with the engine.
+    pub intercept: Arc<Intercept>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -53,6 +56,9 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/activity", post(post_activity))
         .route("/api/v1/repeater", post(repeater_custom))
         .route("/api/v1/repeater/from/:id", post(repeater_from))
+        .route("/api/v1/intercept", get(intercept_get).post(intercept_toggle))
+        .route("/api/v1/intercept/:id/forward", post(intercept_forward))
+        .route("/api/v1/intercept/:id/drop", post(intercept_drop))
         .with_state(state)
 }
 
@@ -158,6 +164,83 @@ async fn repeater_from(State(st): State<AppState>, Path(id): Path<i64>) -> Respo
     {
         Ok(flow) => Json(flow).into_response(),
         Err(e) => err(e),
+    }
+}
+
+// ---- Interactive intercept (§5.1) ----
+
+/// Current intercept state + the queue of held requests.
+async fn intercept_get(State(st): State<AppState>) -> Response {
+    let queue: Vec<_> = st
+        .intercept
+        .queue()
+        .into_iter()
+        .map(|(id, req)| json!({ "id": id, "request": req }))
+        .collect();
+    Json(json!({ "on": st.intercept.enabled(), "queue": queue })).into_response()
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ToggleBody {
+    pub on: bool,
+}
+
+/// Turn intercept on/off. Turning off releases everything currently held.
+async fn intercept_toggle(State(st): State<AppState>, Json(b): Json<ToggleBody>) -> Response {
+    st.intercept.set_enabled(b.on);
+    if !b.on {
+        st.intercept.release_all();
+    }
+    let _ = st.events.send(FlowEvent::InterceptState { on: b.on });
+    Json(json!({ "on": b.on })).into_response()
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct EditBody {
+    pub method: Option<String>,
+    pub path: Option<String>,
+    /// Present with a string sets the query; present as null clears it; absent keeps it.
+    #[serde(default, deserialize_with = "double_option")]
+    pub query: Option<Option<String>>,
+    pub headers: Option<Vec<Header>>,
+    /// Request body as UTF-8 text.
+    pub body: Option<String>,
+}
+
+/// Distinguish "field absent" from "field present but null" for `query`.
+fn double_option<'de, D>(d: D) -> Result<Option<Option<String>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(Some(Option::<String>::deserialize(d)?))
+}
+
+/// Forward a held request, applying any edits in the body.
+async fn intercept_forward(
+    State(st): State<AppState>,
+    Path(id): Path<u64>,
+    body: Option<Json<EditBody>>,
+) -> Response {
+    let edit = body.map(|Json(e)| Edit {
+        method: e.method,
+        path: e.path,
+        query: e.query,
+        headers: e.headers,
+        body: e.body.map(String::into_bytes),
+    });
+    if st.intercept.forward(id, edit) {
+        Json(json!({ "ok": true })).into_response()
+    } else {
+        (StatusCode::NOT_FOUND, Json(json!({ "error": "no such held request" }))).into_response()
+    }
+}
+
+/// Drop a held request.
+async fn intercept_drop(State(st): State<AppState>, Path(id): Path<u64>) -> Response {
+    if st.intercept.discard(id) {
+        Json(json!({ "ok": true })).into_response()
+    } else {
+        (StatusCode::NOT_FOUND, Json(json!({ "error": "no such held request" }))).into_response()
     }
 }
 

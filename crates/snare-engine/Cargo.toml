@@ -14,3 +14,4 @@ hudsucker = "0.23"
 rcgen = { version = "0.13", features = ["pem"] }
 http-body-util = "0.1"
 hyper = "1"
+bytes = "1"

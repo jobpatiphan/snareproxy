@@ -95,6 +95,24 @@
   #ailog .list{overflow:auto;padding:4px 0}
   #ailog .item{padding:5px 12px;border-bottom:1px solid var(--line);font-family:var(--mono);font-size:11px}
   #ailog .item .t{color:var(--purple)} #ailog .item .d{color:var(--dim)} #ailog .item .ts{color:#586069}
+
+  /* Intercept editor */
+  #btnIntercept.on{background:var(--err);color:#fff;border-color:var(--err);font-weight:700}
+  #intercept{position:fixed;inset:0;background:rgba(2,4,8,.72);display:none;
+    flex-direction:column;align-items:center;justify-content:center;z-index:20;padding:4vh 4vw}
+  #intercept.show{display:flex}
+  #intercept .ihead{width:100%;max-width:1000px;display:flex;align-items:center;gap:12px;
+    background:#1a1206;border:1px solid var(--err);border-bottom:0;border-radius:10px 10px 0 0;padding:10px 14px}
+  #intercept .paused{color:var(--err);font-weight:800;letter-spacing:.4px}
+  #intercept .iq{color:var(--dim);font-family:var(--mono);font-size:12px}
+  #intercept .hint{color:var(--dim);font-size:12px}
+  #intercept .grow{flex:1}
+  #intercept button{border:0;padding:6px 16px;border-radius:6px;cursor:pointer;font-weight:700;font-size:13px;
+    background:var(--ok);color:#04260f}
+  #intercept button.danger{background:var(--err);color:#fff}
+  #intercept textarea{width:100%;max-width:1000px;height:56vh;background:#0a0e14;color:#e6edf3;
+    border:1px solid var(--err);border-radius:0 0 10px 10px;padding:14px;font-family:var(--mono);
+    font-size:13px;line-height:1.55;resize:none;outline:none}
 </style>
 </head>
 <body>
@@ -104,6 +122,7 @@
   <span class="stat"><b id="count">0</b> flows</span>
   <span class="grow"></span>
   <input type="text" id="filter" placeholder="filter host / path / method…" autocomplete="off">
+  <button id="btnIntercept" title="Hold requests at a breakpoint to edit/drop them">⏸ Intercept: off</button>
   <button id="btnNotify" title="Desktop popups when the AI acts">🔔 Popups: off</button>
   <button id="btnAuto" class="active" title="Auto-scroll to newest">⤓ Auto</button>
   <button id="btnClear" title="Clear the view (does not delete stored flows)">Clear</button>
@@ -142,12 +161,24 @@
   <div class="list" id="ailogList"></div>
 </div>
 
+<div id="intercept">
+  <div class="ihead">
+    <span class="paused">⏸ REQUEST HELD</span>
+    <span class="iq" id="iqueue"></span>
+    <span class="grow"></span>
+    <span class="hint">edit the raw request below, then</span>
+    <button id="iforward" title="Send it (with your edits)">Forward ▶</button>
+    <button id="idrop" class="danger" title="Drop it — client gets 403">Drop ✕</button>
+  </div>
+  <textarea id="iedit" spellcheck="false" autocomplete="off"></textarea>
+</div>
+
 <script>
 (() => {
   const $ = id => document.getElementById(id);
   const rows = $('rows'), countEl = $('count'), dot = $('dot');
   const state = { flows: new Map(), order: [], sel: null, detail: null, tab: 'req',
-                  auto: true, notify: false, filter: '' };
+                  auto: true, notify: false, filter: '', intercept: false, held: [] };
 
   // ---------- helpers ----------
   const esc = s => (s==null?'':String(s)).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
@@ -261,6 +292,67 @@
     $('aiAgo').textContent = s<2?'now':s<60?s+'s ago':Math.round(s/60)+'m ago';
     if(s>8) document.title='🪤 Snare — Live'; } }, 1000);
 
+  // ---------- Intercept ----------
+  function reqToText(r){
+    const target = r.path + (r.query ? '?'+r.query : '');
+    let s = `${r.method} ${target} ${r.http_version||'HTTP/1.1'}\n`;
+    for(const [k,v] of (r.headers||[])) s += `${k}: ${v}\n`;
+    return s + '\n' + b64dec(r.body||'');
+  }
+  function textToReq(t){
+    const nl = t.indexOf('\n\n');
+    const head = nl>=0 ? t.slice(0,nl) : t;
+    const body = nl>=0 ? t.slice(nl+2) : '';
+    const lines = head.split('\n');
+    const first = (lines.shift()||'').trim().split(/\s+/);
+    const target = first[1] || '/';
+    const qi = target.indexOf('?');
+    const headers = [];
+    for(const ln of lines){ const c = ln.indexOf(':'); if(c>0) headers.push([ln.slice(0,c).trim(), ln.slice(c+1).trim()]); }
+    return { method: first[0]||'GET',
+             path: qi>=0 ? target.slice(0,qi) : target,
+             query: qi>=0 ? target.slice(qi+1) : null,
+             headers, body };
+  }
+  function renderIntercept(){
+    const p = $('intercept');
+    if(state.held.length === 0){ p.classList.remove('show'); return; }
+    const item = state.held[0];
+    // Only (re)fill the editor when switching to a new held request.
+    if(p.dataset.id !== String(item.id)){
+      p.dataset.id = String(item.id);
+      $('iedit').value = reqToText(item.request);
+    }
+    $('iqueue').textContent = state.held.length>1 ? `(+${state.held.length-1} more queued)` : '';
+    p.classList.add('show');
+    $('iedit').focus();
+  }
+  async function iresolve(action){
+    const item = state.held[0]; if(!item) return;
+    $('intercept').dataset.id = '';           // force refill for the next one
+    state.held = state.held.filter(h => h.id !== item.id);
+    renderIntercept();
+    if(action==='drop'){
+      await fetch(`/api/v1/intercept/${item.id}/drop`, {method:'POST'});
+    } else {
+      const r = textToReq($('iedit').value);
+      await fetch(`/api/v1/intercept/${item.id}/forward`,
+        {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(r)});
+    }
+  }
+  async function toggleIntercept(){
+    const on = !state.intercept;
+    await fetch('/api/v1/intercept',
+      {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({on})});
+    // state syncs via the intercept_state SSE event
+  }
+  function setInterceptBtn(on){
+    state.intercept = on;
+    const b = $('btnIntercept');
+    b.textContent = on ? '⏸ Intercept: ON' : '⏸ Intercept: off';
+    b.classList.toggle('on', on);
+  }
+
   // ---------- SSE ----------
   function connect(){
     const es = new EventSource('/api/v1/stream');
@@ -271,6 +363,9 @@
       if(m.event==='flow_new') upsert(m.summary, true);
       else if(m.event==='flow_update') upsert(m.summary, false);
       else if(m.event==='activity') onActivity(m.activity);
+      else if(m.event==='intercept_paused'){ state.held.push({id:m.id, request:m.request}); renderIntercept(); }
+      else if(m.event==='intercept_resolved'){ state.held = state.held.filter(h=>h.id!==m.id); renderIntercept(); }
+      else if(m.event==='intercept_state'){ setInterceptBtn(m.on); if(!m.on){ state.held=[]; renderIntercept(); } }
     };
   }
 
@@ -279,6 +374,12 @@
     try{
       const r = await fetch('/api/v1/flows?limit=300'); const list = await r.json();
       list.reverse().forEach(f => upsert(f, false)); // oldest first so newest ends on top
+    }catch(e){}
+    try{
+      const s = await (await fetch('/api/v1/intercept')).json();
+      setInterceptBtn(!!s.on);
+      state.held = (s.queue||[]).map(q => ({id:q.id, request:q.request}));
+      renderIntercept();
     }catch(e){}
   }
 
@@ -296,6 +397,13 @@
     e.target.textContent = state.notify ? '🔔 Popups: on' : '🔔 blocked';
     e.target.classList.toggle('active', state.notify);
   };
+  $('btnIntercept').onclick = toggleIntercept;
+  $('iforward').onclick = () => iresolve('forward');
+  $('idrop').onclick = () => iresolve('drop');
+  // Ctrl/Cmd+Enter = forward the held request quickly
+  $('iedit').addEventListener('keydown', e => {
+    if((e.ctrlKey||e.metaKey) && e.key==='Enter'){ e.preventDefault(); iresolve('forward'); }
+  });
   $('ailogClose').onclick = () => $('ailog').classList.remove('show');
   $('dTabs').addEventListener('click', e => {
     if(e.target.tagName!=='BUTTON') return;
