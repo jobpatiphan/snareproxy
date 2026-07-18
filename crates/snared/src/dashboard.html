@@ -169,6 +169,19 @@
   #decoder textarea{margin:10px 14px;height:22vh;background:#0a0e14;color:#e6edf3;border:1px solid var(--line);
     border-radius:6px;padding:10px;font-family:var(--mono);font-size:12px;resize:none;outline:none}
   #decoder textarea:last-child{margin-top:0}
+  /* Sequencer (reuses decoder box) */
+  #sequencer{position:fixed;inset:0;background:rgba(2,4,8,.72);display:none;align-items:center;justify-content:center;z-index:20}
+  #sequencer.show{display:flex}
+  #sequencer .dbox{width:min(680px,92vw);background:var(--panel);border:1px solid var(--line);border-radius:10px;display:flex;flex-direction:column}
+  #sequencer .rhead{display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--line);font-weight:700}
+  #sequencer .rhead .grow{flex:1} #sequencer .rhead .ihint{color:var(--dim);font-weight:400;font-size:12px}
+  #sequencer .rhead button{background:var(--accent);color:#000;border:0;padding:5px 14px;border-radius:6px;cursor:pointer;font-weight:700}
+  #sequencer .rhead span[id]{cursor:pointer;color:var(--dim)}
+  #sequencer textarea{margin:10px 14px;height:26vh;background:#0a0e14;color:#e6edf3;border:1px solid var(--line);border-radius:6px;padding:10px;font-family:var(--mono);font-size:12px;resize:none;outline:none}
+  #sequencer .seqout{margin:0 14px 14px;font-family:var(--mono);font-size:13px;color:var(--fg)}
+  #sequencer .seqout .verdict{font-weight:700;padding:6px 0}
+  #sequencer .seqout .STRONG{color:var(--ok)} #sequencer .seqout .MODERATE{color:var(--accent2)} #sequencer .seqout .WEAK{color:var(--err)} #sequencer .seqout .INCONCLUSIVE{color:var(--dim)}
+  #sequencer .seqout .row{color:var(--dim)} #sequencer .seqout .row b{color:var(--fg)}
   /* Comparer */
   #comparer{position:fixed;inset:0;background:rgba(2,4,8,.72);display:none;align-items:center;justify-content:center;z-index:20}
   #comparer.show{display:flex}
@@ -243,6 +256,7 @@
   <button id="btnMap" title="Sitemap — captured hosts &amp; paths">🗺 Sitemap</button>
   <button id="btnWs" title="Captured WebSocket messages">🔌 WS <b id="wsCount"></b></button>
   <button id="btnCompare" title="Compare two requests/responses">⚖ Compare</button>
+  <button id="btnSeq" title="Sequencer — token randomness">🎲 Seq</button>
   <button id="btnDecoder" title="Encode / decode">🔧 Decoder</button>
   <button id="btnNotify" title="Desktop popups when the AI acts">🔔 Popups: off</button>
   <button id="btnAuto" class="active" title="Auto-scroll to newest">⤓ Auto</button>
@@ -333,6 +347,15 @@
       <textarea id="cb" spellcheck="false" placeholder="B"></textarea>
     </div>
     <div class="cresult" id="cresult" style="display:none"></div>
+  </div>
+</div>
+
+<div id="sequencer">
+  <div class="dbox">
+    <div class="rhead">🎲 Sequencer <span class="ihint">paste tokens (one per line) — analyse randomness</span>
+      <span class="grow"></span><button id="seqrun">Analyse</button><span id="seqClose">✕</span></div>
+    <textarea id="seqin" spellcheck="false" placeholder="token per line"></textarea>
+    <div id="seqout" class="seqout"></div>
   </div>
 </div>
 
@@ -793,6 +816,21 @@
     } else runCompare();
   }
 
+  // ---------- Sequencer ----------
+  async function runSequencer(){
+    const tokens = $('seqin').value.split('\n').map(s=>s.trim()).filter(Boolean);
+    if(!tokens.length){ $('seqout').innerHTML = '<div class="row">paste some tokens first</div>'; return; }
+    $('seqout').innerHTML = '<div class="row">analysing…</div>';
+    try{
+      const d = await (await fetch('/api/v1/sequencer',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tokens})})).json();
+      const vclass = (d.verdict||'').split(' ')[0].split('—')[0].trim();
+      $('seqout').innerHTML =
+        `<div class="verdict ${vclass}">${esc(d.verdict)}</div>`+
+        `<div class="row"><b>${d.samples}</b> samples · <b>${d.unique}</b> unique · <b>${d.duplicates}</b> dupes · len <b>${d.min_len}–${d.max_len}</b> · charset <b>${d.charset_size}</b></div>`+
+        `<div class="row">avg position entropy <b>${d.avg_position_entropy_bits}</b> bits · total <b>${d.total_entropy_bits}</b> bits</div>`;
+    }catch(e){ $('seqout').innerHTML = '<div class="row">error: '+esc(e.message)+'</div>'; }
+  }
+
   // ---------- Decoder ----------
   const dec = {
     b64e: s => btoa(unescape(encodeURIComponent(s))),
@@ -932,6 +970,9 @@
   $('btnCompare').onclick = () => $('comparer').classList.add('show');
   $('compClose').onclick = () => $('comparer').classList.remove('show');
   $('cbtn').onclick = toggleCompare;
+  $('btnSeq').onclick = () => $('sequencer').classList.add('show');
+  $('seqClose').onclick = () => $('sequencer').classList.remove('show');
+  $('seqrun').onclick = runSequencer;
   $('btnDecoder').onclick = () => $('decoder').classList.add('show');
   $('decClose').onclick = () => $('decoder').classList.remove('show');
   document.querySelectorAll('#decoder .dbtns button').forEach(b => b.onclick = () => runDecoder(b.dataset.op));

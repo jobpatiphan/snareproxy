@@ -28,7 +28,7 @@ use snare_core::store::{FlowQuery, FlowStore};
 use tokio::sync::broadcast;
 use tokio_stream::{wrappers::BroadcastStream, Stream, StreamExt};
 
-use crate::{active_scan, intruder, repeater};
+use crate::{active_scan, intruder, repeater, sequencer};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -88,6 +88,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/scan/active", post(active_scan_run))
         .route("/api/v1/ws", get(ws_list).post(ws_clear))
         .route("/api/v1/report", get(report))
+        .route("/api/v1/sequencer", post(sequencer_run))
         .with_state(state)
 }
 
@@ -487,6 +488,41 @@ async fn active_scan_run(State(st): State<AppState>, Json(b): Json<ActiveScanBod
     };
     let results = active_scan::scan(&st.store, &st.events, &st.scanner, &base).await;
     Json(json!({ "results": results })).into_response()
+}
+
+// ---- Sequencer ----
+
+#[derive(Debug, Deserialize)]
+pub struct SequencerBody {
+    /// Tokens to analyse directly.
+    #[serde(default)]
+    pub tokens: Vec<String>,
+    /// Or collect from a flow: resend it `count` times and extract with `extract`.
+    pub from_flow: Option<i64>,
+    #[serde(default = "seq_count")]
+    pub count: usize,
+    pub extract: Option<String>,
+}
+fn seq_count() -> usize {
+    30
+}
+
+async fn sequencer_run(State(st): State<AppState>, Json(b): Json<SequencerBody>) -> Response {
+    let tokens = if !b.tokens.is_empty() {
+        b.tokens
+    } else if let (Some(id), Some(extract)) = (b.from_flow, b.extract.as_deref()) {
+        let base = match intruder::base_from_flow(&st.store, id) {
+            Ok(r) => r,
+            Err(e) => return (StatusCode::NOT_FOUND, Json(json!({ "error": e.to_string() }))).into_response(),
+        };
+        match sequencer::collect(&st.store, &st.events, &base, b.count, extract).await {
+            Ok(t) => t,
+            Err(e) => return (StatusCode::BAD_REQUEST, Json(json!({ "error": e.to_string() }))).into_response(),
+        }
+    } else {
+        return (StatusCode::BAD_REQUEST, Json(json!({ "error": "provide tokens[] or from_flow+extract" }))).into_response();
+    };
+    Json(sequencer::analyze(&tokens)).into_response()
 }
 
 // ---- Reporting ----

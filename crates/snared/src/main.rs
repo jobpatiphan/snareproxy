@@ -6,6 +6,7 @@ mod config;
 mod intruder;
 mod paths;
 mod repeater;
+mod sequencer;
 
 use std::net::SocketAddr;
 use std::sync::Arc;
