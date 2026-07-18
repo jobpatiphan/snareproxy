@@ -47,6 +47,28 @@ fn notify_activity(tool: &str, detail: &str) {
     }
 }
 
+/// POST `body` and return the full response body as a string (Connection:
+/// close → read to EOF). Used for tools that need the daemon's reply.
+fn post_read_body(host: &str, port: u16, path: &str, body: &str, read_timeout_ms: u64) -> std::io::Result<String> {
+    use std::io::{Read as _, Write as _};
+    let mut stream = std::net::TcpStream::connect((host, port))?;
+    stream.set_write_timeout(Some(std::time::Duration::from_millis(500)))?;
+    stream.set_read_timeout(Some(std::time::Duration::from_millis(read_timeout_ms)))?;
+    let req = format!(
+        "POST {path} HTTP/1.1\r\nHost: {host}:{port}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    stream.write_all(req.as_bytes())?;
+    stream.flush()?;
+    let mut raw = Vec::new();
+    stream.read_to_end(&mut raw)?;
+    let text = String::from_utf8_lossy(&raw);
+    Ok(text
+        .split_once("\r\n\r\n")
+        .map(|(_, b)| b.to_string())
+        .unwrap_or_else(|| text.into_owned()))
+}
+
 /// Minimal one-shot HTTP/1.1 POST to localhost. Reads the first response bytes
 /// (which the daemon only sends once the handler has finished) so we both avoid
 /// racing the server read and know the request completed. `read_timeout_ms`
@@ -174,6 +196,20 @@ fn tool_specs() -> Value {
                 },
                 "required": ["id"]
             }
+        },
+        {
+            "name": "intruder_run",
+            "description": "Fuzz a captured request: substitute `marker` in its URL/headers/body with each payload and send them (bounded-parallel). Returns status/length per payload. Needs a running `snared`.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "from_flow": { "type": "integer", "description": "flow id to use as template" },
+                    "marker": { "type": "string", "description": "marker to substitute (default §)" },
+                    "payloads": { "type": "array", "items": { "type": "string" } },
+                    "concurrency": { "type": "integer", "description": "parallel requests (default 10)" }
+                },
+                "required": ["from_flow", "payloads"]
+            }
         }
     ])
 }
@@ -234,6 +270,11 @@ fn summarize_call(name: &str, args: &Value) -> String {
         "repeater_send" => {
             let id = args.get("id").and_then(|i| i.as_i64()).unwrap_or(-1);
             format!("resend flow #{id} via repeater")
+        }
+        "intruder_run" => {
+            let id = args.get("id").or_else(|| args.get("from_flow")).and_then(|i| i.as_i64()).unwrap_or(-1);
+            let n = args.get("payloads").and_then(|p| p.as_array()).map(|a| a.len()).unwrap_or(0);
+            format!("intruder: fuzz flow #{id} with {n} payloads")
         }
         other => format!("call {other}"),
     }
@@ -312,6 +353,27 @@ fn tools_call(params: Option<&Value>, store: &SqliteStore) -> Result<Value> {
                 .get_flow(f.id)?
                 .ok_or_else(|| anyhow::anyhow!("repeated flow vanished"))?;
             Ok(text_result(serde_json::to_string_pretty(&format_flow(&flow, "all"))?))
+        }
+        "intruder_run" => {
+            let from_flow = args
+                .get("from_flow")
+                .and_then(|i| i.as_i64())
+                .ok_or_else(|| anyhow::anyhow!("missing `from_flow`"))?;
+            let payloads = args
+                .get("payloads")
+                .and_then(|p| p.as_array())
+                .ok_or_else(|| anyhow::anyhow!("missing `payloads` array"))?;
+            let (host, port) = api_host_port();
+            let body = json!({
+                "from_flow": from_flow,
+                "marker": args.get("marker").and_then(|m| m.as_str()).unwrap_or("§"),
+                "payloads": payloads,
+                "concurrency": args.get("concurrency").and_then(|c| c.as_i64()).unwrap_or(10),
+            })
+            .to_string();
+            let out = post_read_body(&host, port, "/api/v1/intruder", &body, 60_000)
+                .map_err(|e| anyhow::anyhow!("intruder failed (is `snared run` up?): {e}"))?;
+            Ok(text_result(out))
         }
         other => anyhow::bail!("unknown tool: {other}"),
     }

@@ -42,11 +42,12 @@ fn summary_of_request(id: i64, ts: i64, req: &HttpRequest, source: Source) -> Fl
     }
 }
 
-/// Send `method url` with `headers`/`body`, persist the flow, and emit live
-/// events. Returns the stored flow (with response attached).
+/// Send `method url` with `headers`/`body`, persist the flow (tagged `source`),
+/// and emit live events. Returns the stored flow (with response attached).
 pub async fn send(
     store: &Arc<dyn FlowStore>,
     events: &broadcast::Sender<FlowEvent>,
+    source: Source,
     method: &str,
     url: &str,
     headers: &[Header],
@@ -73,9 +74,9 @@ pub async fn send(
 
     // Record the request immediately so it appears in the UI even while in flight.
     let ts = snare_core::now_millis();
-    let id = store.insert_request(ts, Source::Repeater, &req_model)?;
+    let id = store.insert_request(ts, source, &req_model)?;
     let _ = events.send(FlowEvent::FlowNew {
-        summary: summary_of_request(id, ts, &req_model, Source::Repeater),
+        summary: summary_of_request(id, ts, &req_model, source),
     });
 
     let client = reqwest::Client::builder()
@@ -119,7 +120,7 @@ pub async fn send(
     };
     store.attach_response(id, &resp_model, dur)?;
 
-    let mut summary = summary_of_request(id, ts, &req_model, Source::Repeater);
+    let mut summary = summary_of_request(id, ts, &req_model, source);
     summary.status = Some(status);
     summary.mime = resp_model.mime().map(|s| s.to_string());
     summary.resp_size = Some(resp_model.body.len() as u64);

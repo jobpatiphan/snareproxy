@@ -27,7 +27,7 @@ use snare_core::store::{FlowQuery, FlowStore};
 use tokio::sync::broadcast;
 use tokio_stream::{wrappers::BroadcastStream, Stream, StreamExt};
 
-use crate::repeater;
+use crate::{intruder, repeater};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -68,6 +68,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/rules", get(rules_list).post(rules_add))
         .route("/api/v1/rules/:id", axum::routing::delete(rules_delete))
         .route("/api/v1/rules/:id/toggle", post(rules_toggle))
+        .route("/api/v1/intruder", post(intruder_run))
         .with_state(state)
 }
 
@@ -151,7 +152,7 @@ async fn repeater_custom(State(st): State<AppState>, Json(b): Json<RepeaterBody>
         return (StatusCode::BAD_REQUEST, Json(json!({ "error": "method and url required" })))
             .into_response();
     };
-    match repeater::send(&st.store, &st.events, &method, &url, &b.headers, b.body.into_bytes()).await
+    match repeater::send(&st.store, &st.events, snare_core::model::Source::Repeater, &method, &url, &b.headers, b.body.into_bytes()).await
     {
         Ok(flow) => Json(flow).into_response(),
         Err(e) => err(e),
@@ -169,7 +170,7 @@ async fn repeater_from(State(st): State<AppState>, Path(id): Path<i64>) -> Respo
         Err(e) => return err(e),
     };
     let r = &flow.request;
-    match repeater::send(&st.store, &st.events, &r.method, &r.url(), &r.headers, r.body.clone()).await
+    match repeater::send(&st.store, &st.events, snare_core::model::Source::Repeater, &r.method, &r.url(), &r.headers, r.body.clone()).await
     {
         Ok(flow) => Json(flow).into_response(),
         Err(e) => err(e),
@@ -375,6 +376,37 @@ async fn rules_toggle(
     } else {
         (StatusCode::NOT_FOUND, Json(json!({ "error": "no such rule" }))).into_response()
     }
+}
+
+// ---- Intruder ----
+
+#[derive(Debug, Deserialize)]
+pub struct IntruderBody {
+    /// Flow id to use as the request template.
+    pub from_flow: i64,
+    /// Marker string to substitute (default "§").
+    #[serde(default = "default_marker")]
+    pub marker: String,
+    pub payloads: Vec<String>,
+    #[serde(default = "default_concurrency")]
+    pub concurrency: usize,
+}
+fn default_marker() -> String {
+    "§".into()
+}
+fn default_concurrency() -> usize {
+    10
+}
+
+/// Fuzz a request template with a list of payloads, bounded-parallel.
+async fn intruder_run(State(st): State<AppState>, Json(b): Json<IntruderBody>) -> Response {
+    let base = match intruder::base_from_flow(&st.store, b.from_flow) {
+        Ok(r) => r,
+        Err(e) => return (StatusCode::NOT_FOUND, Json(json!({ "error": e.to_string() }))).into_response(),
+    };
+    let n = b.payloads.len();
+    let results = intruder::run(&st.store, &st.events, &base, &b.marker, b.payloads, b.concurrency).await;
+    Json(json!({ "count": n, "results": results })).into_response()
 }
 
 fn err(e: anyhow::Error) -> Response {
