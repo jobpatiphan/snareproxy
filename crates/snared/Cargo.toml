@@ -13,6 +13,7 @@ path = "src/main.rs"
 snare-core.workspace = true
 snare-engine.workspace = true
 snare-store-sqlite.workspace = true
+snare-store-postgres = { path = "../snare-store-postgres" }
 anyhow.workspace = true
 tokio.workspace = true
 tracing.workspace = true

@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/snare-core",
     "crates/snare-store-sqlite",
+    "crates/snare-store-postgres",
     "crates/snare-engine",
     "crates/snared",
     "crates/snare-tui",

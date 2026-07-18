@@ -42,6 +42,10 @@ enum Cmd {
         /// REST API listen address.
         #[arg(long, default_value = "127.0.0.1:9000")]
         api: SocketAddr,
+        /// Team mode: use a shared Postgres store instead of local SQLite,
+        /// e.g. `postgres://snare:snare@host:5432/snare` (design: team-mode.md T1).
+        #[arg(long)]
+        postgres: Option<String>,
     },
     /// List captured flows.
     Flows {
@@ -78,9 +82,9 @@ fn main() -> Result<()> {
 
     match cli.cmd {
         Cmd::Ca { action } => cmd_ca(&paths, action),
-        Cmd::Run { proxy, api } => {
+        Cmd::Run { proxy, api, postgres } => {
             let rt = tokio::runtime::Runtime::new()?;
-            rt.block_on(cmd_run(&paths, proxy, api))
+            rt.block_on(cmd_run(&paths, proxy, api, postgres))
         }
         Cmd::Flows { search, limit } => cmd_flows(&paths, search, limit),
         Cmd::Flush => cmd_flush(&paths),
@@ -132,15 +136,31 @@ fn set_key_perms(path: &std::path::Path) {
 #[cfg(not(unix))]
 fn set_key_perms(_path: &std::path::Path) {}
 
-async fn cmd_run(paths: &Paths, proxy_addr: SocketAddr, api_addr: SocketAddr) -> Result<()> {
+async fn cmd_run(
+    paths: &Paths,
+    proxy_addr: SocketAddr,
+    api_addr: SocketAddr,
+    postgres: Option<String>,
+) -> Result<()> {
     if !paths.ca_key().exists() {
         bail!("no CA yet — run `snared ca generate` first");
     }
     let ca_cert_pem = std::fs::read_to_string(paths.ca_cert())?;
     let ca_key_pem = std::fs::read_to_string(paths.ca_key())?;
 
-    let store = Arc::new(open_store(paths)?);
-    let store_dyn: Arc<dyn FlowStore> = store.clone();
+    // Team mode: shared Postgres store; otherwise local SQLite.
+    let store_dyn: Arc<dyn FlowStore> = match &postgres {
+        Some(url) => {
+            let pg = snare_store_postgres::PostgresStore::connect(url)
+                .context("connect Postgres (team mode)")?;
+            tracing::info!("store: Postgres (team mode)");
+            Arc::new(pg)
+        }
+        None => {
+            tracing::info!("store: SQLite (local)");
+            Arc::new(open_store(paths)?)
+        }
+    };
     let (events, _rx) = tokio::sync::broadcast::channel(1024);
     let intercept = Arc::new(snare_core::intercept::Intercept::new());
     let rules = Arc::new(snare_core::rules::Rules::new());
