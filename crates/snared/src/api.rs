@@ -402,8 +402,10 @@ async fn rules_toggle(
 
 #[derive(Debug, Deserialize)]
 pub struct IntruderBody {
-    /// Flow id to use as the request template.
-    pub from_flow: i64,
+    /// Flow id to use as the request template (used when `base` is absent).
+    pub from_flow: Option<i64>,
+    /// Explicit request template (from the Web editor, with markers inserted).
+    pub base: Option<RepeaterBody>,
     /// Marker string to substitute (default "§").
     #[serde(default = "default_marker")]
     pub marker: String,
@@ -420,9 +422,23 @@ fn default_concurrency() -> usize {
 
 /// Fuzz a request template with a list of payloads, bounded-parallel.
 async fn intruder_run(State(st): State<AppState>, Json(b): Json<IntruderBody>) -> Response {
-    let base = match intruder::base_from_flow(&st.store, b.from_flow) {
-        Ok(r) => r,
-        Err(e) => return (StatusCode::NOT_FOUND, Json(json!({ "error": e.to_string() }))).into_response(),
+    let base = match (b.base, b.from_flow) {
+        (Some(rb), _) => {
+            let (Some(method), Some(url)) = (rb.method, rb.url) else {
+                return (StatusCode::BAD_REQUEST, Json(json!({ "error": "base needs method and url" }))).into_response();
+            };
+            match intruder::base_from_request(method, &url, rb.headers, rb.body.into_bytes()) {
+                Ok(r) => r,
+                Err(e) => return (StatusCode::BAD_REQUEST, Json(json!({ "error": e.to_string() }))).into_response(),
+            }
+        }
+        (None, Some(id)) => match intruder::base_from_flow(&st.store, id) {
+            Ok(r) => r,
+            Err(e) => return (StatusCode::NOT_FOUND, Json(json!({ "error": e.to_string() }))).into_response(),
+        },
+        (None, None) => {
+            return (StatusCode::BAD_REQUEST, Json(json!({ "error": "from_flow or base required" }))).into_response()
+        }
     };
     let n = b.payloads.len();
     let results = intruder::run(&st.store, &st.events, &base, &b.marker, b.payloads, b.concurrency).await;

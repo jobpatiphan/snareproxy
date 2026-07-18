@@ -81,3 +81,29 @@ pub fn base_from_flow(store: &Arc<dyn FlowStore>, id: i64) -> Result<HttpRequest
         .ok_or_else(|| anyhow::anyhow!("flow {id} not found"))?;
     Ok(flow.request)
 }
+
+/// Build a base request from explicit parts (a URL the operator has marked),
+/// so the Web UI can send a request template with `§` markers inserted.
+pub fn base_from_request(
+    method: String,
+    url: &str,
+    headers: Vec<Header>,
+    body: Vec<u8>,
+) -> Result<HttpRequest> {
+    let parsed = reqwest::Url::parse(url).map_err(|e| anyhow::anyhow!("bad url: {e}"))?;
+    let scheme = parsed.scheme().to_string();
+    let port = parsed
+        .port_or_known_default()
+        .unwrap_or(if scheme == "https" { 443 } else { 80 });
+    Ok(HttpRequest {
+        method,
+        scheme,
+        host: parsed.host_str().unwrap_or("").to_string(),
+        port,
+        path: parsed.path().to_string(),
+        query: parsed.query().map(|s| s.to_string()),
+        http_version: "HTTP/1.1".into(),
+        headers,
+        body,
+    })
+}

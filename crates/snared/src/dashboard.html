@@ -142,6 +142,24 @@
   #decoder textarea{margin:10px 14px;height:22vh;background:#0a0e14;color:#e6edf3;border:1px solid var(--line);
     border-radius:6px;padding:10px;font-family:var(--mono);font-size:12px;resize:none;outline:none}
   #decoder textarea:last-child{margin-top:0}
+  /* Intruder */
+  #intruder{position:fixed;inset:0;background:rgba(2,4,8,.72);display:none;align-items:center;justify-content:center;z-index:20}
+  #intruder.show{display:flex}
+  #intruder .ibox{width:min(900px,94vw);max-height:88vh;background:var(--panel);border:1px solid var(--line);border-radius:10px;display:flex;flex-direction:column;overflow:hidden}
+  #intruder .rhead{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--line);font-weight:700}
+  #intruder .rhead .grow{flex:1} #intruder .rhead .ihint{color:var(--dim);font-weight:400;font-size:12px}
+  #intruder .rhead label{color:var(--dim);font-weight:400;font-size:12px}
+  #intruder .rhead input{background:var(--panel2);border:1px solid var(--line);color:var(--fg);width:52px;padding:3px 6px;border-radius:5px;font-family:var(--mono)}
+  #intruder .rhead button{background:var(--accent);color:#000;border:0;padding:5px 14px;border-radius:6px;cursor:pointer;font-weight:700}
+  #intruder .rhead span[id]{cursor:pointer;color:var(--dim)}
+  #intruder .icols{display:flex;gap:10px;padding:10px 14px}
+  #intruder #ireq{flex:2} #intruder #ipayloads{flex:1}
+  #intruder textarea{height:30vh;background:#0a0e14;color:#e6edf3;border:1px solid var(--line);border-radius:6px;padding:10px;font-family:var(--mono);font-size:12px;resize:none;outline:none}
+  #intruder .iresults{overflow:auto;border-top:1px solid var(--line);max-height:34vh}
+  #intruder table{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:12px}
+  #intruder th{position:sticky;top:0;background:var(--panel);color:var(--dim);text-align:left;padding:5px 12px;border-bottom:1px solid var(--line)}
+  #intruder td{padding:4px 12px;border-bottom:1px solid var(--line);white-space:nowrap}
+  #intruder .irow{padding:12px 14px;color:var(--dim)}
   #btnIntercept.on,#btnInterceptResp.on{background:var(--err);color:#fff;border-color:var(--err);font-weight:700}
   #intercept{position:fixed;inset:0;background:rgba(2,4,8,.72);display:none;
     flex-direction:column;align-items:center;justify-content:center;z-index:20;padding:4vh 4vw}
@@ -209,6 +227,21 @@
 <div id="ailog">
   <div class="h"><span>🤖</span> AI activity <span class="grow"></span><span id="ailogClose">✕</span></div>
   <div class="list" id="ailogList"></div>
+</div>
+
+<div id="intruder">
+  <div class="ibox">
+    <div class="rhead">⚔ Intruder <span class="ihint">insert § in the request where each payload goes</span>
+      <span class="grow"></span>
+      <label>marker <input id="imarker" value="§"></label>
+      <label>threads <input id="iconc" value="10"></label>
+      <button id="irun">Run ▶</button><span id="intruderClose">✕</span></div>
+    <div class="icols">
+      <textarea id="ireq" spellcheck="false" placeholder="request template"></textarea>
+      <textarea id="ipayloads" spellcheck="false" placeholder="payloads — one per line"></textarea>
+    </div>
+    <div class="iresults" id="iresults"></div>
+  </div>
 </div>
 
 <div id="decoder">
@@ -327,9 +360,11 @@
       const f = state.detail;
       const url = f.request.url ? f.request.url : (f.request.scheme+'://'+f.request.host+f.request.path);
       $('dHead').innerHTML = `<button id="resend" title="Resend this request (Repeater)">↻ Resend</button>`+
+        `<button id="tointruder" title="Send to Intruder (fuzz)">⚔ Intruder</button>`+
         `<span class="m m-${esc(f.request.method)}">${esc(f.request.method)}</span> `+
         `<span class="url">${esc(url)}</span>`;
       $('resend').onclick = () => resend(id);
+      $('tointruder').onclick = () => openIntruder();
       renderDetail();
     }catch(e){ $('dHead').innerHTML='<span class="s5">failed to load</span>'; }
   }
@@ -491,6 +526,44 @@
     else { const e = await r.json().catch(()=>({})); $('rerr').textContent = 'bad regex: '+(e.error||r.status); }
   }
 
+  // ---------- Intruder ----------
+  function flowUrl(r, path, query){
+    const defp = (r.scheme==='https'&&r.port===443)||(r.scheme==='http'&&r.port===80);
+    const auth = defp ? r.host : `${r.host}:${r.port}`;
+    return `${r.scheme}://${auth}${path}${query?('?'+query):''}`;
+  }
+  function openIntruder(){
+    const f = state.detail; if(!f) return;
+    $('ireq').value = reqToText(f.request);
+    $('iresults').innerHTML = '<div class="irow">edit the request (add § markers), paste payloads, then Run</div>';
+    $('intruder').classList.add('show');
+  }
+  async function runIntruder(){
+    const f = state.detail; if(!f) return;
+    const p = textToReq($('ireq').value);
+    const url = flowUrl(f.request, p.path, p.query);
+    const payloads = $('ipayloads').value.split('\n').filter(s => s.length);
+    if(!payloads.length){ $('iresults').innerHTML = '<div class="irow">no payloads</div>'; return; }
+    const body = { base: { method:p.method, url, headers:p.headers, body:p.body },
+                   marker: $('imarker').value || '§', payloads,
+                   concurrency: parseInt($('iconc').value)||10 };
+    $('iresults').innerHTML = `<div class="irow">running ${payloads.length} payloads…</div>`;
+    try{
+      const r = await (await fetch('/api/v1/intruder',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
+      renderIntruderResults(r.results||[]);
+    }catch(e){ $('iresults').innerHTML = '<div class="irow">error: '+esc(e.message)+'</div>'; }
+  }
+  function renderIntruderResults(rows){
+    // sort by payload order preserved from server (unordered) -> keep as-is
+    let html = '<table><thead><tr><th>payload</th><th>status</th><th>length</th><th>ms</th></tr></thead><tbody>';
+    for(const r of rows){
+      const sc = r.status ? 's'+String(r.status)[0] : 's0';
+      html += `<tr><td>${esc(r.payload)}</td><td class="${sc}">${r.status??esc(r.error||'—')}</td>`+
+        `<td>${r.length??''}</td><td>${r.ms??''}</td></tr>`;
+    }
+    $('iresults').innerHTML = html + '</tbody></table>';
+  }
+
   // ---------- Decoder ----------
   const dec = {
     b64e: s => btoa(unescape(encodeURIComponent(s))),
@@ -601,6 +674,8 @@
   });
   $('btnRules').onclick = () => { $('rules').classList.add('show'); loadRules(); };
   $('rulesClose').onclick = () => $('rules').classList.remove('show');
+  $('irun').onclick = runIntruder;
+  $('intruderClose').onclick = () => $('intruder').classList.remove('show');
   $('btnDecoder').onclick = () => $('decoder').classList.add('show');
   $('decClose').onclick = () => $('decoder').classList.remove('show');
   document.querySelectorAll('#decoder .dbtns button').forEach(b => b.onclick = () => runDecoder(b.dataset.op));
