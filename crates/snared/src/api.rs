@@ -87,6 +87,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/findings", get(findings_list).post(scanner_toggle))
         .route("/api/v1/scan/active", post(active_scan_run))
         .route("/api/v1/ws", get(ws_list).post(ws_clear))
+        .route("/api/v1/report", get(report))
         .with_state(state)
 }
 
@@ -486,6 +487,108 @@ async fn active_scan_run(State(st): State<AppState>, Json(b): Json<ActiveScanBod
     };
     let results = active_scan::scan(&st.store, &st.events, &st.scanner, &base).await;
     Json(json!({ "results": results })).into_response()
+}
+
+// ---- Reporting ----
+
+#[derive(Debug, Deserialize)]
+pub struct ReportParams {
+    /// "md" (default) or "sarif".
+    #[serde(default)]
+    pub format: Option<String>,
+}
+
+/// Generate an engagement report from the scanner findings.
+async fn report(State(st): State<AppState>, Query(p): Query<ReportParams>) -> Response {
+    use snare_core::scanner::Severity;
+    let findings = st.scanner.list();
+    let flow_count = st.store.count().unwrap_or(0);
+
+    match p.format.as_deref() {
+        Some("sarif") => {
+            let results: Vec<_> = findings
+                .iter()
+                .map(|f| {
+                    let level = match f.severity {
+                        Severity::High => "error",
+                        Severity::Medium => "warning",
+                        _ => "note",
+                    };
+                    json!({
+                        "ruleId": f.title,
+                        "level": level,
+                        "message": { "text": f.detail },
+                        "locations": [{
+                            "physicalLocation": {
+                                "artifactLocation": { "uri": format!("https://{}", f.host) }
+                            }
+                        }]
+                    })
+                })
+                .collect();
+            let sarif = json!({
+                "version": "2.1.0",
+                "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+                "runs": [{
+                    "tool": { "driver": { "name": "Snare", "informationUri": "https://github.com/jobpatiphan/bogbogprox" } },
+                    "results": results
+                }]
+            });
+            (
+                [("content-type", "application/sarif+json"),
+                 ("content-disposition", "attachment; filename=\"snare-report.sarif\"")],
+                serde_json::to_string_pretty(&sarif).unwrap_or_default(),
+            )
+                .into_response()
+        }
+        _ => {
+            let mut counts = [0usize; 4]; // info, low, medium, high
+            for f in &findings {
+                counts[match f.severity {
+                    Severity::Info => 0,
+                    Severity::Low => 1,
+                    Severity::Medium => 2,
+                    Severity::High => 3,
+                }] += 1;
+            }
+            let mut md = String::new();
+            md.push_str("# Snare — security report\n\n");
+            md.push_str(&format!("- Flows captured: **{flow_count}**\n"));
+            md.push_str(&format!(
+                "- Findings: **{}** (high {}, medium {}, low {}, info {})\n\n",
+                findings.len(), counts[3], counts[2], counts[1], counts[0]
+            ));
+            md.push_str("## Findings\n\n");
+            if findings.is_empty() {
+                md.push_str("_No findings._\n");
+            } else {
+                md.push_str("| Severity | Title | Host | Detail |\n|---|---|---|---|\n");
+                // High → info order
+                let mut sorted = findings.clone();
+                sorted.sort_by_key(|f| match f.severity {
+                    Severity::High => 0,
+                    Severity::Medium => 1,
+                    Severity::Low => 2,
+                    Severity::Info => 3,
+                });
+                for f in sorted {
+                    let sev = match f.severity {
+                        Severity::High => "HIGH",
+                        Severity::Medium => "MEDIUM",
+                        Severity::Low => "LOW",
+                        Severity::Info => "INFO",
+                    };
+                    let detail = f.detail.replace('|', "\\|").replace('\n', " ");
+                    md.push_str(&format!("| {sev} | {} | {} | {} |\n", f.title, f.host, detail));
+                }
+            }
+            (
+                [("content-type", "text/markdown; charset=utf-8")],
+                md,
+            )
+                .into_response()
+        }
+    }
 }
 
 // ---- WebSocket capture ----

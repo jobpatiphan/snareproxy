@@ -118,6 +118,8 @@
   #rules .ritem .rtoggle{cursor:pointer} #rules .ritem .rdel{cursor:pointer;color:var(--err)}
   #rules .ritem.off{opacity:.45}
   #btnFindings b, #btnWs b{color:var(--accent2)}
+  #findings .freport{color:var(--info);text-decoration:none;font-weight:400;font-size:12px;margin-right:8px}
+  #findings .freport:hover{text-decoration:underline}
   #wsmsgs{position:fixed;inset:0;background:rgba(2,4,8,.72);display:none;align-items:center;justify-content:center;z-index:20}
   #wsmsgs.show{display:flex}
   #wsmsgs .fbox{width:min(820px,94vw);max-height:82vh;background:var(--panel);border:1px solid var(--line);border-radius:10px;display:flex;flex-direction:column;overflow:hidden}
@@ -130,6 +132,19 @@
   #wsmsgs .wsi .k{color:var(--dim);width:56px} #wsmsgs .wsi .h{color:var(--dim)}
   #wsmsgs .wsi .d{flex:1;color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   #wsmsgs .empty2{color:var(--dim);padding:24px;text-align:center;font-style:italic}
+  #sitemap{position:fixed;inset:0;background:rgba(2,4,8,.72);display:none;align-items:center;justify-content:center;z-index:20}
+  #sitemap.show{display:flex}
+  #sitemap .fbox{width:min(820px,94vw);max-height:82vh;background:var(--panel);border:1px solid var(--line);border-radius:10px;display:flex;flex-direction:column;overflow:hidden}
+  #sitemap .rhead{display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--line);font-weight:700}
+  #sitemap .rhead .grow{flex:1} #sitemap .rhead .ihint{color:var(--dim);font-weight:400;font-size:12px} #sitemap .rhead span[id]{cursor:pointer;color:var(--dim)}
+  #sitemap .flist{overflow:auto;padding:4px 0;font-family:var(--mono);font-size:12px}
+  #sitemap .host{padding:6px 12px;color:var(--accent2);font-weight:700;cursor:pointer;border-top:1px solid var(--line)}
+  #sitemap .host .cnt{color:var(--dim);font-weight:400}
+  #sitemap .leaf{padding:3px 12px 3px 30px;cursor:pointer;display:flex;gap:8px;white-space:nowrap;overflow:hidden}
+  #sitemap .leaf:hover{background:#1c2230}
+  #sitemap .leaf .lm{width:52px} #sitemap .leaf .lp{flex:1;overflow:hidden;text-overflow:ellipsis}
+  #sitemap .collapsed .leaf{display:none}
+  #sitemap .empty2{color:var(--dim);padding:24px;text-align:center;font-style:italic}
   #findings{position:fixed;inset:0;background:rgba(2,4,8,.72);display:none;align-items:center;justify-content:center;z-index:20}
   #findings.show{display:flex}
   #findings .fbox{width:min(760px,92vw);max-height:80vh;background:var(--panel);border:1px solid var(--line);
@@ -225,6 +240,7 @@
   <button id="btnInterceptResp" title="Also hold responses">⏸ Resp: off</button>
   <button id="btnRules" title="Match &amp; Replace rules">⚙ M&amp;R</button>
   <button id="btnFindings" title="Passive scan findings">⚠ Findings <b id="findCount"></b></button>
+  <button id="btnMap" title="Sitemap — captured hosts &amp; paths">🗺 Sitemap</button>
   <button id="btnWs" title="Captured WebSocket messages">🔌 WS <b id="wsCount"></b></button>
   <button id="btnCompare" title="Compare two requests/responses">⚖ Compare</button>
   <button id="btnDecoder" title="Encode / decode">🔧 Decoder</button>
@@ -292,6 +308,14 @@
   </div>
 </div>
 
+<div id="sitemap">
+  <div class="fbox">
+    <div class="rhead">🗺 Sitemap <span class="ihint">captured hosts &amp; paths — click to open</span>
+      <span class="grow"></span><span id="mapRefresh" title="rebuild" style="margin-right:10px">refresh</span><span id="mapClose">✕</span></div>
+    <div class="flist" id="maplist"></div>
+  </div>
+</div>
+
 <div id="wsmsgs">
   <div class="fbox">
     <div class="rhead">🔌 WebSocket messages <span class="grow"></span>
@@ -329,6 +353,8 @@
 <div id="findings">
   <div class="fbox">
     <div class="rhead">⚠ Passive scan findings <span class="grow"></span>
+      <a href="/api/v1/report?format=md" target="_blank" class="freport" title="Markdown report">report ↗</a>
+      <a href="/api/v1/report?format=sarif" class="freport" title="SARIF export">SARIF ↓</a>
       <span id="findClear" title="clear" style="margin-right:10px">clear</span><span id="findClose">✕</span></div>
     <div class="flist" id="flist"></div>
   </div>
@@ -688,6 +714,36 @@
     $('iresults').innerHTML = html + '</tbody></table>';
   }
 
+  // ---------- Sitemap ----------
+  function buildSitemap(){
+    const hosts = new Map();
+    // group flows by host; per unique "METHOD path" keep the newest flow id + status
+    for(const {f} of state.flows.values()){
+      if(!hosts.has(f.host)) hosts.set(f.host, new Map());
+      const key = f.method + ' ' + f.path;
+      const cur = hosts.get(f.host).get(key);
+      if(!cur || f.id > cur.id) hosts.get(f.host).set(key, {id:f.id, method:f.method, path:f.path, status:f.status});
+    }
+    const el = $('maplist'); el.innerHTML = '';
+    if(hosts.size === 0){ el.innerHTML = '<div class="empty2">no traffic captured yet</div>'; return; }
+    for(const host of [...hosts.keys()].sort()){
+      const entries = [...hosts.get(host).values()].sort((a,b)=>a.path.localeCompare(b.path));
+      const grp = document.createElement('div');
+      const h = document.createElement('div'); h.className = 'host';
+      h.innerHTML = `▾ ${esc(host)} <span class="cnt">(${entries.length})</span>`;
+      h.onclick = () => { grp.classList.toggle('collapsed'); h.firstChild.textContent = grp.classList.contains('collapsed')?'▸ ':'▾ '; };
+      grp.appendChild(h);
+      for(const e of entries){
+        const sc = e.status ? 's'+String(e.status)[0] : 's0';
+        const leaf = document.createElement('div'); leaf.className = 'leaf';
+        leaf.innerHTML = `<span class="lm m m-${esc(e.method)}">${esc(e.method)}</span><span class="lp">${esc(e.path)}</span><span class="${sc}">${e.status||''}</span>`;
+        leaf.onclick = () => { $('sitemap').classList.remove('show'); select(e.id); };
+        grp.appendChild(leaf);
+      }
+      el.appendChild(grp);
+    }
+  }
+
   // ---------- WebSocket messages ----------
   function wsItemHtml(m){
     const dir = m.direction==='send' ? '▲' : '▼';
@@ -867,6 +923,9 @@
   $('rpreq').addEventListener('keydown', e => { if((e.ctrlKey||e.metaKey)&&e.key==='Enter'){ e.preventDefault(); rpSend(); }});
   $('irun').onclick = runIntruder;
   $('intruderClose').onclick = () => $('intruder').classList.remove('show');
+  $('btnMap').onclick = () => { $('sitemap').classList.add('show'); buildSitemap(); };
+  $('mapClose').onclick = () => $('sitemap').classList.remove('show');
+  $('mapRefresh').onclick = buildSitemap;
   $('btnWs').onclick = () => { $('wsmsgs').classList.add('show'); loadWs(); };
   $('wsClose').onclick = () => $('wsmsgs').classList.remove('show');
   $('wsClear').onclick = async () => { await fetch('/api/v1/ws',{method:'POST'}); loadWs(); };
