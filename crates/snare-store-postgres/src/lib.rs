@@ -16,6 +16,9 @@ use postgres::NoTls;
 use snare_core::model::{Flow, FlowSummary, Header, HttpRequest, HttpResponse, Source};
 use snare_core::store::{FlowQuery, FlowStore};
 
+/// Advisory-lock key that serializes schema init across daemons.
+const INIT_LOCK: i64 = 91370001;
+
 const SCHEMA: &str = r#"
     CREATE TABLE IF NOT EXISTS flows (
         id            BIGSERIAL PRIMARY KEY,
@@ -42,6 +45,17 @@ const SCHEMA: &str = r#"
     CREATE INDEX IF NOT EXISTS idx_flows_host ON flows(host);
 "#;
 
+/// Run the schema DDL guarded by an advisory lock so concurrent daemons don't
+/// race on `CREATE TABLE IF NOT EXISTS`. The lock and DDL must be *separate*
+/// autocommit statements: in one multi-statement query they share a transaction,
+/// and the CREATE wouldn't see the lock-holder's committed catalog.
+fn init_schema(client: &mut postgres::Client) -> Result<(), postgres::Error> {
+    client.execute("SELECT pg_advisory_lock($1)", &[&INIT_LOCK])?;
+    let res = client.batch_execute(SCHEMA);
+    let _ = client.execute("SELECT pg_advisory_unlock($1)", &[&INIT_LOCK]);
+    res
+}
+
 type Job = Box<dyn FnOnce(&mut postgres::Client) + Send>;
 
 #[derive(Clone)]
@@ -67,7 +81,7 @@ impl PostgresStore {
                         return;
                     }
                 };
-                if let Err(e) = client.batch_execute(SCHEMA) {
+                if let Err(e) = init_schema(&mut client) {
                     let _ = ready_tx.send(Err(anyhow!("schema: {e}")));
                     return;
                 }

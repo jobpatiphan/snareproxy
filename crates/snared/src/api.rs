@@ -50,6 +50,8 @@ pub struct AppState {
     pub macros: Arc<snare_core::session::Macros>,
     /// Team-mode auth (no-op in local mode).
     pub auth: Arc<crate::auth::Auth>,
+    /// Cross-process events relayed from other daemons (topology B).
+    pub remote_events: broadcast::Sender<FlowEvent>,
     /// Where persisted settings are written.
     pub config_path: std::path::PathBuf,
 }
@@ -250,15 +252,17 @@ async fn get_flow(State(st): State<AppState>, Path(id): Path<i64>) -> Response {
 async fn stream(
     State(st): State<AppState>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
-    let rx = st.events.subscribe();
-    // A lagged receiver (slow client) yields an error we simply skip rather than
-    // tear the connection down — the client can re-sync via REST if it cares.
-    let stream = BroadcastStream::new(rx).filter_map(|res| match res {
+    // Merge the local event bus with the cross-process (remote) bus, so an
+    // operator sees events from every proxy sharing this engagement.
+    let to_event = |res: Result<FlowEvent, _>| match res {
         Ok(ev) => serde_json::to_string(&ev)
             .ok()
             .map(|json| Ok(Event::default().data(json))),
         Err(_) => None,
-    });
+    };
+    let local = BroadcastStream::new(st.events.subscribe()).filter_map(to_event);
+    let remote = BroadcastStream::new(st.remote_events.subscribe()).filter_map(to_event);
+    let stream = local.merge(remote);
     Sse::new(stream).keep_alive(KeepAlive::default())
 }
 

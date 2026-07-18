@@ -7,6 +7,7 @@ mod config;
 mod intruder;
 mod macros;
 mod paths;
+mod pubsub;
 mod repeater;
 mod sequencer;
 
@@ -169,6 +170,14 @@ async fn cmd_run(
         }
     };
     let (events, _rx) = tokio::sync::broadcast::channel(1024);
+    // Cross-process events from other daemons (topology B); merged into SSE.
+    let (remote_events, _rrx) = tokio::sync::broadcast::channel(1024);
+    // Relay the local event bus through Postgres so several proxies share live
+    // events. (Central single-daemon mode doesn't need it but it's harmless.)
+    if let Some(url) = &postgres {
+        pubsub::start(url.clone(), events.clone(), remote_events.clone());
+        tracing::info!("cross-process events: Postgres LISTEN/NOTIFY");
+    }
     let intercept = Arc::new(snare_core::intercept::Intercept::new());
     let rules = Arc::new(snare_core::rules::Rules::new());
     let scanner = Arc::new(snare_core::scanner::Scanner::new());
@@ -197,6 +206,7 @@ async fn cmd_run(
         vars: vars.clone(),
         macros: session_macros.clone(),
         auth: Arc::new(auth::Auth::new(auth_token)),
+        remote_events: remote_events.clone(),
         config_path: config_path.clone(),
     });
     let listener = tokio::net::TcpListener::bind(api_addr)
