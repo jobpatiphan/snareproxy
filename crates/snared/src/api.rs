@@ -9,8 +9,9 @@ use std::convert::Infallible;
 use std::sync::Arc;
 
 use axum::{
-    extract::{Path, Query, State},
+    extract::{Path, Query, Request, State},
     http::StatusCode,
+    middleware::{self, Next},
     response::{
         sse::{Event, KeepAlive, Sse},
         Html, IntoResponse, Response,
@@ -47,6 +48,8 @@ pub struct AppState {
     pub vars: Arc<snare_core::session::Vars>,
     /// Session macros.
     pub macros: Arc<snare_core::session::Macros>,
+    /// Team-mode auth (no-op in local mode).
+    pub auth: Arc<crate::auth::Auth>,
     /// Where persisted settings are written.
     pub config_path: std::path::PathBuf,
 }
@@ -77,6 +80,8 @@ pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/", get(dashboard))
         .route("/api/v1/health", get(health))
+        .route("/api/v1/team/join", post(team_join))
+        .route("/api/v1/team/whoami", get(team_whoami))
         .route("/api/v1/stats", get(stats))
         .route("/api/v1/flows", get(list_flows))
         .route("/api/v1/flows/:id", get(get_flow))
@@ -104,7 +109,44 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/macros", get(macros_list).post(macros_add))
         .route("/api/v1/macros/:id", axum::routing::delete(macros_delete))
         .route("/api/v1/macros/:id/run", post(macros_run))
+        .layer(middleware::from_fn_with_state(state.clone(), auth_mw))
         .with_state(state)
+}
+
+/// Team-mode auth gate. No-op in local mode. Exempts the dashboard, health, and
+/// the join/whoami endpoints; everything else needs a valid session token
+/// (header `Authorization: Bearer` or, for EventSource, `?token=`).
+async fn auth_mw(State(st): State<AppState>, mut req: Request, next: Next) -> Response {
+    if !st.auth.enabled() {
+        return next.run(req).await;
+    }
+    let path = req.uri().path();
+    let exempt = path == "/"
+        || path == "/api/v1/health"
+        || path == "/api/v1/team/join"
+        || path == "/api/v1/team/whoami"
+        || !path.starts_with("/api/");
+    if exempt {
+        return next.run(req).await;
+    }
+    let from_header = req
+        .headers()
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.strip_prefix("Bearer "))
+        .map(str::to_string);
+    let from_query = req.uri().query().and_then(|q| {
+        q.split('&')
+            .find_map(|kv| kv.strip_prefix("token="))
+            .map(str::to_string)
+    });
+    match from_header.or(from_query).and_then(|t| st.auth.verify_session(&t)) {
+        Some(op) => {
+            req.extensions_mut().insert(op);
+            next.run(req).await
+        }
+        None => (StatusCode::UNAUTHORIZED, Json(json!({ "error": "unauthorized" }))).into_response(),
+    }
 }
 
 /// The self-contained live dashboard (§9 web frontend, Phase-1 slice).
@@ -114,6 +156,58 @@ async fn dashboard() -> Html<&'static str> {
 
 async fn health() -> impl IntoResponse {
     Json(json!({ "status": "ok", "service": "snared" }))
+}
+
+// ---- Team mode: auth ----
+
+#[derive(Debug, Deserialize)]
+pub struct JoinBody {
+    pub project_token: String,
+    #[serde(default)]
+    pub display_name: String,
+}
+
+/// Join a team engagement: exchange the shared project token for a session token.
+async fn team_join(State(st): State<AppState>, Json(b): Json<JoinBody>) -> Response {
+    if !st.auth.enabled() {
+        return Json(json!({ "auth": false, "session_token": null })).into_response();
+    }
+    if !st.auth.verify_project(&b.project_token) {
+        return (StatusCode::UNAUTHORIZED, Json(json!({ "error": "invalid project token" }))).into_response();
+    }
+    let (token, op) = st.auth.create_session(b.display_name);
+    let _ = st.events.send(FlowEvent::Activity {
+        activity: Activity {
+            ts: snare_core::now_millis(),
+            agent: op.display_name.clone(),
+            tool: "join".into(),
+            detail: "joined the engagement".into(),
+        },
+    });
+    Json(json!({
+        "auth": true,
+        "session_token": token,
+        "operator_id": op.id,
+        "display_name": op.display_name,
+    }))
+    .into_response()
+}
+
+/// Whether auth is required, and (if a valid token is supplied) who you are.
+async fn team_whoami(State(st): State<AppState>, req: Request) -> Response {
+    if !st.auth.enabled() {
+        return Json(json!({ "auth": false })).into_response();
+    }
+    let token = req
+        .headers()
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.strip_prefix("Bearer "))
+        .map(str::to_string);
+    match token.and_then(|t| st.auth.verify_session(&t)) {
+        Some(op) => Json(json!({ "auth": true, "authenticated": true, "display_name": op.display_name })).into_response(),
+        None => Json(json!({ "auth": true, "authenticated": false })).into_response(),
+    }
 }
 
 async fn stats(State(st): State<AppState>) -> Response {

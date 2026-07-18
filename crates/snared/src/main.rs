@@ -2,6 +2,7 @@
 
 mod active_scan;
 mod api;
+mod auth;
 mod config;
 mod intruder;
 mod macros;
@@ -46,6 +47,11 @@ enum Cmd {
         /// e.g. `postgres://snare:snare@host:5432/snare` (design: team-mode.md T1).
         #[arg(long)]
         postgres: Option<String>,
+        /// Team mode: require this shared project token to join (T2). Operators
+        /// call `POST /api/v1/team/join` with it to get a session token. Unset =
+        /// local mode, no auth.
+        #[arg(long)]
+        auth_token: Option<String>,
     },
     /// List captured flows.
     Flows {
@@ -82,9 +88,9 @@ fn main() -> Result<()> {
 
     match cli.cmd {
         Cmd::Ca { action } => cmd_ca(&paths, action),
-        Cmd::Run { proxy, api, postgres } => {
+        Cmd::Run { proxy, api, postgres, auth_token } => {
             let rt = tokio::runtime::Runtime::new()?;
-            rt.block_on(cmd_run(&paths, proxy, api, postgres))
+            rt.block_on(cmd_run(&paths, proxy, api, postgres, auth_token))
         }
         Cmd::Flows { search, limit } => cmd_flows(&paths, search, limit),
         Cmd::Flush => cmd_flush(&paths),
@@ -141,6 +147,7 @@ async fn cmd_run(
     proxy_addr: SocketAddr,
     api_addr: SocketAddr,
     postgres: Option<String>,
+    auth_token: Option<String>,
 ) -> Result<()> {
     if !paths.ca_key().exists() {
         bail!("no CA yet — run `snared ca generate` first");
@@ -176,6 +183,8 @@ async fn cmd_run(
         tracing::info!("restored {} rule(s) from {}", persisted.rules.len(), config_path.display());
     }
 
+    let auth_enabled = auth_token.is_some();
+
     // REST API — shares the live event bus, the intercept breakpoint, the
     // match/replace rules, and the passive scanner with the proxy engine.
     let app = api::router(api::AppState {
@@ -187,6 +196,7 @@ async fn cmd_run(
         wslog: wslog.clone(),
         vars: vars.clone(),
         macros: session_macros.clone(),
+        auth: Arc::new(auth::Auth::new(auth_token)),
         config_path: config_path.clone(),
     });
     let listener = tokio::net::TcpListener::bind(api_addr)
@@ -211,6 +221,10 @@ async fn cmd_run(
     println!("  proxy     : http://{proxy_addr}  (point your browser/agent here)");
     println!("  api       : http://{api_addr}");
     println!("  dashboard : http://{api_addr}/  ← open this to watch traffic live");
+    if auth_enabled {
+        println!("  auth      : TEAM MODE — operators must join with the project token");
+        println!("              (serve behind TLS / a reverse proxy before exposing it)");
+    }
     println!("  press Ctrl-C to stop");
 
     snare_engine::run(cfg, store_dyn, events, intercept, rules, scanner, vars, wslog, async {

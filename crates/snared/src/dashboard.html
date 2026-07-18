@@ -84,6 +84,16 @@
   .gql{color:var(--purple);font-weight:700} .gqlq{color:#c8a9ff}
   .empty{color:var(--dim);padding:26px;text-align:center;font-style:italic}
 
+  /* Login overlay (team mode) */
+  #login{position:fixed;inset:0;background:#0d1117;display:none;align-items:center;justify-content:center;z-index:50}
+  #login.show{display:flex}
+  #login .lbox{width:min(360px,90vw);background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:26px;display:flex;flex-direction:column;gap:12px}
+  #login .lh{font-size:18px;font-weight:700}
+  #login .lp{color:var(--dim);font-size:13px;margin:0}
+  #login input{background:var(--panel2);border:1px solid var(--line);color:var(--fg);padding:9px 11px;border-radius:8px;font-family:var(--mono);font-size:13px}
+  #login .lerr{color:var(--err);font-size:12px;min-height:14px}
+  #login button{background:var(--accent);color:#000;border:0;padding:9px;border-radius:8px;cursor:pointer;font-weight:700;font-size:14px}
+
   /* AI log drawer */
   #ailog{position:fixed;right:0;bottom:0;width:360px;max-height:44%;background:var(--panel);
     border:1px solid var(--purple);border-right:0;border-bottom:0;border-top-left-radius:10px;
@@ -311,6 +321,17 @@
   </div>
 </main>
 
+<div id="login">
+  <div class="lbox">
+    <div class="lh">🪤 Snare — join engagement</div>
+    <p class="lp">This is a team server. Enter the project token to join.</p>
+    <input type="password" id="ltoken" placeholder="project token" autocomplete="off">
+    <input type="text" id="lname" placeholder="your name" autocomplete="off">
+    <div class="lerr" id="lerr"></div>
+    <button id="lbtn">Join</button>
+  </div>
+</div>
+
 <div id="ailog">
   <div class="h"><span>🤖</span> AI activity <span class="grow"></span><span id="ailogClose">✕</span></div>
   <div class="list" id="ailogList"></div>
@@ -464,6 +485,19 @@
 (() => {
   const $ = id => document.getElementById(id);
   const rows = $('rows'), countEl = $('count'), dot = $('dot');
+
+  // ---------- Auth (team mode) ----------
+  let authToken = localStorage.getItem('snare_token') || null;
+  const _fetch = window.fetch.bind(window);
+  // Inject the session token on same-origin /api/ calls (EventSource handled separately).
+  window.fetch = (url, opts) => {
+    opts = opts || {};
+    if(authToken && typeof url === 'string' && url.startsWith('/api/')){
+      opts.headers = Object.assign({}, opts.headers, { 'Authorization': 'Bearer ' + authToken });
+    }
+    return _fetch(url, opts);
+  };
+
   const state = { flows: new Map(), order: [], sel: null, detail: null, tab: 'req',
                   auto: true, notify: false, query: [], intercept: false, interceptResp: false, held: [], findings: [], ws: [] };
 
@@ -999,7 +1033,7 @@
 
   // ---------- SSE ----------
   function connect(){
-    const es = new EventSource('/api/v1/stream');
+    const es = new EventSource('/api/v1/stream' + (authToken ? ('?token=' + encodeURIComponent(authToken)) : ''));
     es.onopen = () => dot.classList.add('on');
     es.onerror = () => dot.classList.remove('on');
     es.onmessage = ev => {
@@ -1108,7 +1142,35 @@
     renderDetail();
   });
 
-  initial(); connect();
+  // ---------- Boot (auth-gated) ----------
+  function start(){ initial(); connect(); }
+  async function doLogin(){
+    $('lerr').textContent = '';
+    try{
+      const r = await _fetch('/api/v1/team/join', {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ project_token: $('ltoken').value, display_name: $('lname').value })});
+      if(r.ok){
+        const d = await r.json();
+        if(d.session_token){ authToken = d.session_token; localStorage.setItem('snare_token', authToken);
+          $('login').classList.remove('show'); start(); return; }
+      }
+      $('lerr').textContent = 'invalid project token';
+    }catch(e){ $('lerr').textContent = 'error: ' + e.message; }
+  }
+  $('lbtn').onclick = doLogin;
+  $('lname').addEventListener('keydown', e => { if(e.key==='Enter') doLogin(); });
+  async function boot(){
+    let who;
+    try{ who = await (await _fetch('/api/v1/team/whoami', authToken?{headers:{'Authorization':'Bearer '+authToken}}:{})).json(); }
+    catch(e){ who = { auth:false }; }
+    if(who.auth && !who.authenticated){
+      authToken = null; localStorage.removeItem('snare_token');
+      $('login').classList.add('show'); $('ltoken').focus();
+      return; // start() runs after successful join
+    }
+    start();
+  }
+  boot();
 })();
 </script>
 </body>
