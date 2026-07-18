@@ -1,6 +1,7 @@
 //! `snared` — the Snare daemon: proxy engine + REST API + project store.
 
 mod api;
+mod config;
 mod intruder;
 mod paths;
 mod repeater;
@@ -142,6 +143,13 @@ async fn cmd_run(paths: &Paths, proxy_addr: SocketAddr, api_addr: SocketAddr) ->
     let rules = Arc::new(snare_core::rules::Rules::new());
     let scanner = Arc::new(snare_core::scanner::Scanner::new());
 
+    // Restore persisted rules / scope / scanner state from the last run.
+    let config_path = paths.config_file();
+    if let Some(persisted) = config::load(&config_path) {
+        config::apply(&persisted, &rules, &intercept, &scanner);
+        tracing::info!("restored {} rule(s) from {}", persisted.rules.len(), config_path.display());
+    }
+
     // REST API — shares the live event bus, the intercept breakpoint, the
     // match/replace rules, and the passive scanner with the proxy engine.
     let app = api::router(api::AppState {
@@ -150,6 +158,7 @@ async fn cmd_run(paths: &Paths, proxy_addr: SocketAddr, api_addr: SocketAddr) ->
         intercept: intercept.clone(),
         rules: rules.clone(),
         scanner: scanner.clone(),
+        config_path: config_path.clone(),
     });
     let listener = tokio::net::TcpListener::bind(api_addr)
         .await

@@ -40,4 +40,8 @@ impl Paths {
     pub fn db(&self) -> PathBuf {
         self.data_dir.join("flows.sqlite")
     }
+    /// Persisted rules / scope / scanner settings.
+    pub fn config_file(&self) -> PathBuf {
+        self.config_dir.join("config.json")
+    }
 }

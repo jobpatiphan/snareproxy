@@ -231,3 +231,38 @@ impl Intercept {
         self.release_responses();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn empty_scope_matches_all() {
+        let i = Intercept::new();
+        assert!(i.in_scope("anything.test"));
+    }
+
+    #[test]
+    fn scope_matches_substring() {
+        let i = Intercept::new();
+        i.set_scope(vec!["example.com".into()]);
+        assert!(i.in_scope("api.example.com"));
+        assert!(!i.in_scope("evil.test"));
+    }
+
+    #[test]
+    fn scope_ignores_blank_entries() {
+        let i = Intercept::new();
+        i.set_scope(vec!["  ".into(), "".into()]);
+        assert!(i.in_scope("anything")); // blanks filtered → still "all"
+    }
+
+    #[test]
+    fn toggles_default_off() {
+        let i = Intercept::new();
+        assert!(!i.enabled());
+        assert!(!i.responses_enabled());
+        i.set_enabled(true);
+        assert!(i.enabled());
+    }
+}

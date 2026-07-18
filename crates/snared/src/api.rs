@@ -41,6 +41,16 @@ pub struct AppState {
     pub rules: Arc<Rules>,
     /// Passive scanner shared with the engine.
     pub scanner: Arc<Scanner>,
+    /// Where persisted settings (rules/scope/scanner) are written.
+    pub config_path: std::path::PathBuf,
+}
+
+impl AppState {
+    /// Persist rules/scope/scanner after a mutation. Best-effort.
+    fn persist(&self) {
+        let snap = crate::config::snapshot(&self.rules, &self.intercept, &self.scanner);
+        crate::config::save(&self.config_path, &snap);
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -243,6 +253,7 @@ pub struct ScopeBody {
 /// Set the intercept scope (host substrings; empty = every host).
 async fn intercept_scope(State(st): State<AppState>, Json(b): Json<ScopeBody>) -> Response {
     st.intercept.set_scope(b.hosts);
+    st.persist();
     Json(json!({ "scope": st.intercept.scope() })).into_response()
 }
 
@@ -352,13 +363,17 @@ fn yes() -> bool {
 
 async fn rules_add(State(st): State<AppState>, Json(b): Json<RuleBody>) -> Response {
     match st.rules.add(b.name, b.part, b.pattern, b.replace, b.enabled) {
-        Ok(spec) => Json(spec).into_response(),
+        Ok(spec) => {
+            st.persist();
+            Json(spec).into_response()
+        }
         Err(e) => (StatusCode::BAD_REQUEST, Json(json!({ "error": e }))).into_response(),
     }
 }
 
 async fn rules_delete(State(st): State<AppState>, Path(id): Path<u64>) -> Response {
     if st.rules.remove(id) {
+        st.persist();
         Json(json!({ "ok": true })).into_response()
     } else {
         (StatusCode::NOT_FOUND, Json(json!({ "error": "no such rule" }))).into_response()
@@ -376,6 +391,7 @@ async fn rules_toggle(
     Json(b): Json<RuleToggle>,
 ) -> Response {
     if st.rules.set_enabled(id, b.on) {
+        st.persist();
         Json(json!({ "ok": true })).into_response()
     } else {
         (StatusCode::NOT_FOUND, Json(json!({ "error": "no such rule" }))).into_response()
@@ -433,6 +449,7 @@ async fn scanner_toggle(State(st): State<AppState>, Json(b): Json<ScannerToggle>
     if b.clear {
         st.scanner.clear();
     }
+    st.persist();
     Json(json!({ "on": st.scanner.enabled() })).into_response()
 }
 

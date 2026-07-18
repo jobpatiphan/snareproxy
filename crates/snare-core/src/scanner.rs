@@ -159,3 +159,58 @@ impl Scanner {
         out
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::{Flow, HttpRequest, HttpResponse, Source};
+
+    fn flow(resp_headers: Vec<(String, String)>) -> Flow {
+        Flow {
+            id: 1,
+            ts: 0,
+            source: Source::Proxy,
+            request: HttpRequest {
+                method: "GET".into(),
+                scheme: "https".into(),
+                host: "h".into(),
+                port: 443,
+                path: "/".into(),
+                query: None,
+                http_version: "HTTP/1.1".into(),
+                headers: vec![],
+                body: vec![],
+            },
+            response: Some(HttpResponse {
+                status: 200,
+                http_version: "HTTP/1.1".into(),
+                headers: resp_headers,
+                body: b"<html></html>".to_vec(),
+            }),
+            duration_ms: Some(1),
+        }
+    }
+
+    #[test]
+    fn flags_missing_security_headers() {
+        let s = Scanner::new();
+        let found = s.scan(&flow(vec![("content-type".into(), "text/html".into())]));
+        assert!(found.iter().any(|f| f.title.contains("Content-Security-Policy")));
+        assert!(found.iter().any(|f| f.title.contains("HSTS")));
+    }
+
+    #[test]
+    fn dedupes_per_host() {
+        let s = Scanner::new();
+        let f = flow(vec![("content-type".into(), "text/html".into())]);
+        assert!(!s.scan(&f).is_empty());
+        assert!(s.scan(&f).is_empty(), "same host reported twice");
+    }
+
+    #[test]
+    fn disabled_scanner_finds_nothing() {
+        let s = Scanner::new();
+        s.set_enabled(false);
+        assert!(s.scan(&flow(vec![])).is_empty());
+    }
+}

@@ -166,6 +166,66 @@ impl Rules {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::HttpRequest;
+
+    fn req(body: &str) -> HttpRequest {
+        HttpRequest {
+            method: "GET".into(),
+            scheme: "https".into(),
+            host: "h".into(),
+            port: 443,
+            path: "/a".into(),
+            query: None,
+            http_version: "HTTP/1.1".into(),
+            headers: vec![("User-Agent".into(), "curl".into())],
+            body: body.as_bytes().to_vec(),
+        }
+    }
+
+    #[test]
+    fn body_replace_all() {
+        let r = Rules::new();
+        r.add("t".into(), Part::RequestBody, "foo".into(), "bar".into(), true).unwrap();
+        let mut q = req("foo baz foo");
+        assert!(r.apply_request(&mut q));
+        assert_eq!(String::from_utf8_lossy(&q.body), "bar baz bar");
+    }
+
+    #[test]
+    fn url_capture_group() {
+        let r = Rules::new();
+        r.add("t".into(), Part::RequestUrl, r"/(\w+)".into(), "/x-$1".into(), true).unwrap();
+        let mut q = req("");
+        assert!(r.apply_request(&mut q));
+        assert_eq!(q.path, "/x-a");
+    }
+
+    #[test]
+    fn header_rule_can_remove() {
+        let r = Rules::new();
+        r.add("t".into(), Part::RequestHeader, "^User-Agent:.*".into(), "".into(), true).unwrap();
+        let mut q = req("");
+        assert!(r.apply_request(&mut q));
+        assert!(q.headers.is_empty());
+    }
+
+    #[test]
+    fn bad_regex_is_rejected() {
+        assert!(Rules::new().add("t".into(), Part::RequestBody, "(".into(), "".into(), true).is_err());
+    }
+
+    #[test]
+    fn disabled_rule_is_noop() {
+        let r = Rules::new();
+        r.add("t".into(), Part::RequestBody, "foo".into(), "bar".into(), false).unwrap();
+        let mut q = req("foo");
+        assert!(!r.apply_request(&mut q));
+    }
+}
+
 /// Apply a rule across header lines ("Name: Value"); an empty result drops the
 /// header, letting a rule remove headers too.
 fn apply_headers(headers: &mut Vec<Header>, c: &CompiledRule) -> bool {
