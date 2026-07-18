@@ -9,6 +9,7 @@ pub mod model;
 pub mod rules;
 pub mod scanner;
 pub mod store;
+pub mod ws;
 
 pub use model::{Activity, Flow, FlowEvent, FlowSummary, Header, HttpRequest, HttpResponse, Source};
 pub use store::{FlowQuery, FlowStore};

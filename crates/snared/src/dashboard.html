@@ -117,7 +117,19 @@
   #rules .ritem .rp{color:var(--info);width:120px} #rules .ritem .rx{flex:1;color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   #rules .ritem .rtoggle{cursor:pointer} #rules .ritem .rdel{cursor:pointer;color:var(--err)}
   #rules .ritem.off{opacity:.45}
-  #btnFindings b{color:var(--err)}
+  #btnFindings b, #btnWs b{color:var(--accent2)}
+  #wsmsgs{position:fixed;inset:0;background:rgba(2,4,8,.72);display:none;align-items:center;justify-content:center;z-index:20}
+  #wsmsgs.show{display:flex}
+  #wsmsgs .fbox{width:min(820px,94vw);max-height:82vh;background:var(--panel);border:1px solid var(--line);border-radius:10px;display:flex;flex-direction:column;overflow:hidden}
+  #wsmsgs .rhead{display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--line);font-weight:700}
+  #wsmsgs .rhead .grow{flex:1} #wsmsgs .rhead span[id]{cursor:pointer;color:var(--dim)}
+  #wsmsgs .flist{overflow:auto;padding:4px 0}
+  #wsmsgs .wsi{padding:5px 14px;border-bottom:1px solid var(--line);font-family:var(--mono);font-size:12px;display:flex;gap:8px;align-items:baseline}
+  #wsmsgs .wsi .dir{font-weight:700;width:16px}
+  #wsmsgs .wsi .send{color:var(--info)} #wsmsgs .wsi .recv{color:var(--ok)}
+  #wsmsgs .wsi .k{color:var(--dim);width:56px} #wsmsgs .wsi .h{color:var(--dim)}
+  #wsmsgs .wsi .d{flex:1;color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #wsmsgs .empty2{color:var(--dim);padding:24px;text-align:center;font-style:italic}
   #findings{position:fixed;inset:0;background:rgba(2,4,8,.72);display:none;align-items:center;justify-content:center;z-index:20}
   #findings.show{display:flex}
   #findings .fbox{width:min(760px,92vw);max-height:80vh;background:var(--panel);border:1px solid var(--line);
@@ -213,6 +225,7 @@
   <button id="btnInterceptResp" title="Also hold responses">⏸ Resp: off</button>
   <button id="btnRules" title="Match &amp; Replace rules">⚙ M&amp;R</button>
   <button id="btnFindings" title="Passive scan findings">⚠ Findings <b id="findCount"></b></button>
+  <button id="btnWs" title="Captured WebSocket messages">🔌 WS <b id="wsCount"></b></button>
   <button id="btnCompare" title="Compare two requests/responses">⚖ Compare</button>
   <button id="btnDecoder" title="Encode / decode">🔧 Decoder</button>
   <button id="btnNotify" title="Desktop popups when the AI acts">🔔 Popups: off</button>
@@ -276,6 +289,14 @@
       <textarea id="ipayloads" spellcheck="false" placeholder="payloads — one per line"></textarea>
     </div>
     <div class="iresults" id="iresults"></div>
+  </div>
+</div>
+
+<div id="wsmsgs">
+  <div class="fbox">
+    <div class="rhead">🔌 WebSocket messages <span class="grow"></span>
+      <span id="wsClear" title="clear" style="margin-right:10px">clear</span><span id="wsClose">✕</span></div>
+    <div class="flist" id="wslist"></div>
   </div>
 </div>
 
@@ -350,7 +371,7 @@
   const $ = id => document.getElementById(id);
   const rows = $('rows'), countEl = $('count'), dot = $('dot');
   const state = { flows: new Map(), order: [], sel: null, detail: null, tab: 'req',
-                  auto: true, notify: false, query: [], intercept: false, interceptResp: false, held: [], findings: [] };
+                  auto: true, notify: false, query: [], intercept: false, interceptResp: false, held: [], findings: [], ws: [] };
 
   // ---------- helpers ----------
   const esc = s => (s==null?'':String(s)).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
@@ -667,6 +688,29 @@
     $('iresults').innerHTML = html + '</tbody></table>';
   }
 
+  // ---------- WebSocket messages ----------
+  function wsItemHtml(m){
+    const dir = m.direction==='send' ? '▲' : '▼';
+    return `<span class="dir ${esc(m.direction)}">${dir}</span>`+
+      `<span class="k">${esc(m.kind)}</span>`+
+      `<span class="h">${esc(m.host)}</span>`+
+      `<span class="d">${esc(m.data||'')}</span>`;
+  }
+  function addWs(m, prepend){
+    state.ws.push(m);
+    $('wsCount').textContent = state.ws.length ? state.ws.length : '';
+    const el = $('wslist'); if(el.querySelector('.empty2')) el.innerHTML='';
+    const d = document.createElement('div'); d.className='wsi'; d.innerHTML = wsItemHtml(m);
+    if(prepend) el.prepend(d); else el.appendChild(d);
+  }
+  async function loadWs(){
+    try{
+      const msgs = await (await fetch('/api/v1/ws')).json();
+      state.ws = []; $('wslist').innerHTML = msgs.length ? '' : '<div class="empty2">no WebSocket traffic yet</div>';
+      msgs.forEach(m => addWs(m, false));
+    }catch(e){}
+  }
+
   // ---------- Comparer ----------
   function runCompare(){
     const a = $('ca').value.split('\n'), b = $('cb').value.split('\n');
@@ -756,6 +800,7 @@
       else if(m.event==='flow_update') upsert(m.summary, false);
       else if(m.event==='activity') onActivity(m.activity);
       else if(m.event==='finding') addFinding(m.finding, true);
+      else if(m.event==='ws_message') addWs(m.msg, true);
       else if(m.event==='intercept_paused'){ state.held.push({id:m.id, kind:'req', data:m.request}); renderIntercept(); }
       else if(m.event==='intercept_resp_paused'){ state.held.push({id:m.id, kind:'resp', data:m.response}); renderIntercept(); }
       else if(m.event==='intercept_resolved'){ state.held = state.held.filter(h=>h.id!==m.id); renderIntercept(); }
@@ -785,6 +830,7 @@
       renderIntercept();
     }catch(e){}
     loadFindings();
+    loadWs();
   }
 
   // ---------- controls ----------
@@ -821,6 +867,9 @@
   $('rpreq').addEventListener('keydown', e => { if((e.ctrlKey||e.metaKey)&&e.key==='Enter'){ e.preventDefault(); rpSend(); }});
   $('irun').onclick = runIntruder;
   $('intruderClose').onclick = () => $('intruder').classList.remove('show');
+  $('btnWs').onclick = () => { $('wsmsgs').classList.add('show'); loadWs(); };
+  $('wsClose').onclick = () => $('wsmsgs').classList.remove('show');
+  $('wsClear').onclick = async () => { await fetch('/api/v1/ws',{method:'POST'}); loadWs(); };
   $('btnCompare').onclick = () => $('comparer').classList.add('show');
   $('compClose').onclick = () => $('comparer').classList.remove('show');
   $('cbtn').onclick = toggleCompare;

@@ -133,6 +133,10 @@ impl App {
                 FlowEvent::Finding { finding } => {
                     self.activity = Some((format!("⚠ {}", finding.title), Instant::now()));
                 }
+                FlowEvent::WsMessage { msg } => {
+                    let arrow = if msg.direction == "send" { "▲" } else { "▼" };
+                    self.activity = Some((format!("🔌 {arrow} {} {}", msg.host, msg.kind), Instant::now()));
+                }
             }
         }
         self.status = format!("{} flows", self.flows.len());

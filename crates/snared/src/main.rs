@@ -143,6 +143,7 @@ async fn cmd_run(paths: &Paths, proxy_addr: SocketAddr, api_addr: SocketAddr) ->
     let intercept = Arc::new(snare_core::intercept::Intercept::new());
     let rules = Arc::new(snare_core::rules::Rules::new());
     let scanner = Arc::new(snare_core::scanner::Scanner::new());
+    let wslog = Arc::new(snare_core::ws::WsLog::new());
 
     // Restore persisted rules / scope / scanner state from the last run.
     let config_path = paths.config_file();
@@ -159,6 +160,7 @@ async fn cmd_run(paths: &Paths, proxy_addr: SocketAddr, api_addr: SocketAddr) ->
         intercept: intercept.clone(),
         rules: rules.clone(),
         scanner: scanner.clone(),
+        wslog: wslog.clone(),
         config_path: config_path.clone(),
     });
     let listener = tokio::net::TcpListener::bind(api_addr)
@@ -185,7 +187,7 @@ async fn cmd_run(paths: &Paths, proxy_addr: SocketAddr, api_addr: SocketAddr) ->
     println!("  dashboard : http://{api_addr}/  ← open this to watch traffic live");
     println!("  press Ctrl-C to stop");
 
-    snare_engine::run(cfg, store_dyn, events, intercept, rules, scanner, async {
+    snare_engine::run(cfg, store_dyn, events, intercept, rules, scanner, wslog, async {
         let _ = tokio::signal::ctrl_c().await;
     })
     .await?;

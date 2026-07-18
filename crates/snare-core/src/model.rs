@@ -154,6 +154,13 @@ pub enum FlowEvent {
     InterceptState { on: bool, responses: bool },
     /// The passive scanner raised a finding.
     Finding { finding: crate::scanner::Finding },
+    /// A WebSocket message was captured.
+    WsMessage { msg: crate::ws::WsMessage },
+}
+
+/// Base64-encode bytes (used for binary WebSocket frames, etc.).
+pub fn base64_encode(data: &[u8]) -> String {
+    b64::encode(data)
 }
 
 /// base64 (std, no padding issues) for byte bodies in JSON.

@@ -4,8 +4,10 @@
 //! request/response pair, writes it through the [`FlowStore`] port, and emits
 //! [`FlowEvent`]s for realtime frontends.
 //!
-//! Phase-0 correlation of request→response is per-connection FIFO (correct for
-//! HTTP/1.1 keep-alive; HTTP/2 multiplexing is a Phase-1 refinement).
+//! Request→response correlation is per-connection FIFO. This is correct because
+//! we build hudsucker without its `http2` feature, so both the client-facing and
+//! upstream connections are HTTP/1.1 — requests are serialized per connection and
+//! never multiplexed.
 
 pub mod ca;
 
@@ -24,15 +26,17 @@ use hudsucker::{
     },
     rcgen::{CertificateParams, KeyPair},
     rustls::crypto::aws_lc_rs,
-    Body, HttpContext, HttpHandler, Proxy, RequestOrResponse,
+    tokio_tungstenite::tungstenite::Message,
+    Body, HttpContext, HttpHandler, Proxy, RequestOrResponse, WebSocketContext, WebSocketHandler,
 };
 use snare_core::intercept::{Decision, Intercept, RespDecision};
 use snare_core::model::{
-    FlowEvent, FlowSummary, Header, HttpRequest, HttpResponse, Source,
+    base64_encode, FlowEvent, FlowSummary, Header, HttpRequest, HttpResponse, Source,
 };
 use snare_core::rules::Rules;
 use snare_core::scanner::Scanner;
 use snare_core::store::FlowStore;
+use snare_core::ws::WsLog;
 use tokio::sync::broadcast;
 
 pub use ca::{generate_ca, GeneratedCa};
@@ -157,6 +161,17 @@ impl HttpHandler for CaptureHandler {
         // the CONNECT itself would desync the request→response FIFO (the tunnel
         // never gets its own response), so forward it untouched.
         if req.method() == hudsucker::hyper::Method::CONNECT {
+            return req.into();
+        }
+        // WebSocket upgrades are dispatched by hudsucker to the WS handler; pass
+        // them through untouched so buffering/rebuilding the body doesn't disturb
+        // the upgrade. Capture happens per-message in `WsHandler`.
+        if req
+            .headers()
+            .get(hudsucker::hyper::header::UPGRADE)
+            .map(|v| v.as_bytes().eq_ignore_ascii_case(b"websocket"))
+            .unwrap_or(false)
+        {
             return req.into();
         }
         let (mut parts, body) = req.into_parts();
@@ -349,6 +364,43 @@ impl HttpHandler for CaptureHandler {
     }
 }
 
+/// Capture-only WebSocket handler: logs every message and forwards it unchanged.
+#[derive(Clone)]
+struct WsHandler {
+    events: broadcast::Sender<FlowEvent>,
+    wslog: Arc<WsLog>,
+}
+
+impl WebSocketHandler for WsHandler {
+    async fn handle_message(
+        &mut self,
+        ctx: &WebSocketContext,
+        message: Message,
+    ) -> Option<Message> {
+        let (host, direction) = match ctx {
+            WebSocketContext::ClientToServer { dst, .. } => {
+                (dst.host().unwrap_or("").to_string(), "send")
+            }
+            WebSocketContext::ServerToClient { src, .. } => {
+                (src.host().unwrap_or("").to_string(), "recv")
+            }
+        };
+        let (kind, data, size) = match &message {
+            Message::Text(t) => ("text", t.clone(), t.len()),
+            Message::Binary(b) => ("binary", base64_encode(b), b.len()),
+            Message::Ping(b) => ("ping", String::new(), b.len()),
+            Message::Pong(b) => ("pong", String::new(), b.len()),
+            Message::Close(_) => ("close", String::new(), 0),
+            Message::Frame(_) => ("frame", String::new(), 0),
+        };
+        let msg = self
+            .wslog
+            .record(snare_core::now_millis(), host, direction, kind, data, size);
+        let _ = self.events.send(FlowEvent::WsMessage { msg });
+        Some(message) // capture only — forward unchanged
+    }
+}
+
 /// Load a persisted CA (key + cert PEM) into a hudsucker authority.
 fn authority(cfg: &EngineConfig) -> Result<RcgenAuthority> {
     let key_pair = KeyPair::from_pem(&cfg.ca_key_pem).context("parse CA key")?;
@@ -372,6 +424,7 @@ pub async fn run<F>(
     intercept: Arc<Intercept>,
     rules: Arc<Rules>,
     scanner: Arc<Scanner>,
+    wslog: Arc<WsLog>,
     shutdown: F,
 ) -> Result<()>
 where
@@ -380,18 +433,20 @@ where
     let ca = authority(&cfg)?;
     let handler = CaptureHandler {
         store,
-        events,
+        events: events.clone(),
         intercept,
         rules,
         scanner,
         pending: VecDeque::new(),
     };
+    let ws_handler = WsHandler { events, wslog };
 
     let proxy = Proxy::builder()
         .with_addr(cfg.listen)
         .with_ca(ca)
         .with_rustls_client(aws_lc_rs::default_provider())
         .with_http_handler(handler)
+        .with_websocket_handler(ws_handler)
         .with_graceful_shutdown(shutdown)
         .build()
         .context("build proxy")?;

@@ -41,6 +41,8 @@ pub struct AppState {
     pub rules: Arc<Rules>,
     /// Passive scanner shared with the engine.
     pub scanner: Arc<Scanner>,
+    /// Captured WebSocket messages shared with the engine.
+    pub wslog: Arc<snare_core::ws::WsLog>,
     /// Where persisted settings (rules/scope/scanner) are written.
     pub config_path: std::path::PathBuf,
 }
@@ -84,6 +86,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/intruder", post(intruder_run))
         .route("/api/v1/findings", get(findings_list).post(scanner_toggle))
         .route("/api/v1/scan/active", post(active_scan_run))
+        .route("/api/v1/ws", get(ws_list).post(ws_clear))
         .with_state(state)
 }
 
@@ -483,6 +486,17 @@ async fn active_scan_run(State(st): State<AppState>, Json(b): Json<ActiveScanBod
     };
     let results = active_scan::scan(&st.store, &st.events, &st.scanner, &base).await;
     Json(json!({ "results": results })).into_response()
+}
+
+// ---- WebSocket capture ----
+
+async fn ws_list(State(st): State<AppState>) -> Response {
+    Json(st.wslog.list()).into_response()
+}
+
+async fn ws_clear(State(st): State<AppState>) -> Response {
+    st.wslog.clear();
+    Json(json!({ "ok": true })).into_response()
 }
 
 fn err(e: anyhow::Error) -> Response {
