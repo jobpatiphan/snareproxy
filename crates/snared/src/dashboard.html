@@ -131,6 +131,17 @@
   #findings .sev-low{background:#12324a;color:#58a6ff} #findings .sev-info{background:#21262d;color:#8b949e}
   #findings .fitem .fh{color:var(--dim);font-family:var(--mono)} #findings .fitem .fd{color:var(--dim);margin-top:3px}
   #findings .empty2{color:var(--dim);padding:24px;text-align:center;font-style:italic}
+  #decoder{position:fixed;inset:0;background:rgba(2,4,8,.72);display:none;align-items:center;justify-content:center;z-index:20}
+  #decoder.show{display:flex}
+  #decoder .dbox{width:min(760px,92vw);background:var(--panel);border:1px solid var(--line);border-radius:10px;display:flex;flex-direction:column}
+  #decoder .rhead{display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--line);font-weight:700}
+  #decoder .rhead .grow{flex:1} #decoder .rhead span[id]{cursor:pointer;color:var(--dim)}
+  #decoder .dbtns{display:flex;flex-wrap:wrap;gap:6px;padding:10px 14px;border-bottom:1px solid var(--line)}
+  #decoder .dbtns button{background:var(--panel2);border:1px solid var(--line);color:var(--fg);padding:4px 10px;border-radius:6px;cursor:pointer;font-size:12px}
+  #decoder .dbtns button:hover{border-color:var(--accent)}
+  #decoder textarea{margin:10px 14px;height:22vh;background:#0a0e14;color:#e6edf3;border:1px solid var(--line);
+    border-radius:6px;padding:10px;font-family:var(--mono);font-size:12px;resize:none;outline:none}
+  #decoder textarea:last-child{margin-top:0}
   #btnIntercept.on,#btnInterceptResp.on{background:var(--err);color:#fff;border-color:var(--err);font-weight:700}
   #intercept{position:fixed;inset:0;background:rgba(2,4,8,.72);display:none;
     flex-direction:column;align-items:center;justify-content:center;z-index:20;padding:4vh 4vw}
@@ -161,6 +172,7 @@
   <button id="btnInterceptResp" title="Also hold responses">⏸ Resp: off</button>
   <button id="btnRules" title="Match &amp; Replace rules">⚙ M&amp;R</button>
   <button id="btnFindings" title="Passive scan findings">⚠ Findings <b id="findCount"></b></button>
+  <button id="btnDecoder" title="Encode / decode">🔧 Decoder</button>
   <button id="btnNotify" title="Desktop popups when the AI acts">🔔 Popups: off</button>
   <button id="btnAuto" class="active" title="Auto-scroll to newest">⤓ Auto</button>
   <button id="btnClear" title="Clear the view (does not delete stored flows)">Clear</button>
@@ -197,6 +209,20 @@
 <div id="ailog">
   <div class="h"><span>🤖</span> AI activity <span class="grow"></span><span id="ailogClose">✕</span></div>
   <div class="list" id="ailogList"></div>
+</div>
+
+<div id="decoder">
+  <div class="dbox">
+    <div class="rhead">🔧 Decoder / Encoder <span class="grow"></span><span id="decClose">✕</span></div>
+    <div class="dbtns">
+      <button data-op="b64e">Base64 ▸</button><button data-op="b64d">◂ Base64</button>
+      <button data-op="urle">URL ▸</button><button data-op="urld">◂ URL</button>
+      <button data-op="hexe">Hex ▸</button><button data-op="hexd">◂ Hex</button>
+      <button data-op="jwt">JWT decode</button>
+    </div>
+    <textarea id="decIn" placeholder="input" spellcheck="false"></textarea>
+    <textarea id="decOut" placeholder="output" spellcheck="false" readonly></textarea>
+  </div>
 </div>
 
 <div id="findings">
@@ -465,6 +491,22 @@
     else { const e = await r.json().catch(()=>({})); $('rerr').textContent = 'bad regex: '+(e.error||r.status); }
   }
 
+  // ---------- Decoder ----------
+  const dec = {
+    b64e: s => btoa(unescape(encodeURIComponent(s))),
+    b64d: s => decodeURIComponent(escape(atob(s.replace(/-/g,'+').replace(/_/g,'/')))),
+    urle: s => encodeURIComponent(s),
+    urld: s => decodeURIComponent(s),
+    hexe: s => Array.from(new TextEncoder().encode(s)).map(b=>b.toString(16).padStart(2,'0')).join(''),
+    hexd: s => new TextDecoder().decode(new Uint8Array((s.replace(/[^0-9a-fA-F]/g,'').match(/.{1,2}/g)||[]).map(h=>parseInt(h,16)))),
+    jwt: s => { const p=s.trim().split('.'); const d=x=>JSON.stringify(JSON.parse(dec.b64d(x)),null,2);
+      return 'header:\n'+d(p[0])+'\n\npayload:\n'+d(p[1]); },
+  };
+  function runDecoder(op){
+    try{ $('decOut').value = dec[op]($('decIn').value); }
+    catch(e){ $('decOut').value = 'error: '+e.message; }
+  }
+
   // ---------- Findings (passive scan) ----------
   function fitemHtml(f){
     return `<span class="sev sev-${esc(f.severity)}">${esc(f.severity.toUpperCase())}</span>`+
@@ -559,6 +601,9 @@
   });
   $('btnRules').onclick = () => { $('rules').classList.add('show'); loadRules(); };
   $('rulesClose').onclick = () => $('rules').classList.remove('show');
+  $('btnDecoder').onclick = () => $('decoder').classList.add('show');
+  $('decClose').onclick = () => $('decoder').classList.remove('show');
+  document.querySelectorAll('#decoder .dbtns button').forEach(b => b.onclick = () => runDecoder(b.dataset.op));
   $('btnFindings').onclick = () => $('findings').classList.add('show');
   $('findClose').onclick = () => $('findings').classList.remove('show');
   $('findClear').onclick = async () => { await fetch('/api/v1/findings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({clear:true})}); loadFindings(); };
