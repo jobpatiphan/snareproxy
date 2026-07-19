@@ -1,0 +1,681 @@
+<style>
+  :root{
+    --ink:#14131c; --ink-2:#1b1a26; --panel:#f3f2f7; --panel-2:#e9e8f1;
+    --paper:#eef0f4; --paper-2:#f7f8fb;
+    --text:#1c1b26; --muted:#5a5872; --faint:#8a889e; --hair:#d7d6e4;
+    --indigo:#5257e0; --indigo-2:#6c72ff; --teal:#128a7d; --teal-2:#29b6a6;
+    --good:#1f9d57; --warn:#b7791f; --crit:#c0392b;
+    --scope:#15141d; --scope-line:#2a2838; --scope-text:#e7e5f0; --scope-mut:#a9a7c0;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans Thai",sans-serif;
+    --mono:ui-monospace,"SF Mono","JetBrains Mono","Cascadia Code",Menlo,Consolas,monospace;
+    --rw:73ch;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --paper:#0f0e16; --paper-2:#16151f; --panel:#1a1926; --panel-2:#211f30;
+      --text:#e9e8f2; --muted:#a4a2bb; --faint:#726f8a; --hair:#2b2939;
+      --indigo:#8b90ff; --indigo-2:#a3a7ff; --teal:#3ecbb9; --teal-2:#5fe0cf;
+      --good:#46c47e; --warn:#e0a63a; --crit:#f0685a;
+    }
+  }
+  :root[data-theme="light"]{
+    --paper:#eef0f4; --paper-2:#f7f8fb; --panel:#f3f2f7; --panel-2:#e9e8f1;
+    --text:#1c1b26; --muted:#5a5872; --faint:#8a889e; --hair:#d7d6e4;
+    --indigo:#5257e0; --indigo-2:#6c72ff; --teal:#128a7d; --teal-2:#29b6a6;
+    --good:#1f9d57; --warn:#b7791f; --crit:#c0392b;
+  }
+  :root[data-theme="dark"]{
+    --paper:#0f0e16; --paper-2:#16151f; --panel:#1a1926; --panel-2:#211f30;
+    --text:#e9e8f2; --muted:#a4a2bb; --faint:#726f8a; --hair:#2b2939;
+    --indigo:#8b90ff; --indigo-2:#a3a7ff; --teal:#3ecbb9; --teal-2:#5fe0cf;
+    --good:#46c47e; --warn:#e0a63a; --crit:#f0685a;
+  }
+
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  @media (prefers-reduced-motion: reduce){html{scroll-behavior:auto}}
+  body{margin:0;background:var(--paper);color:var(--text);font-family:var(--sans);
+    line-height:1.65;-webkit-font-smoothing:antialiased;font-size:16.5px}
+
+  .wrap{max-width:1120px;margin:0 auto;padding:0 24px}
+  a{color:var(--indigo);text-decoration:none}
+  a:hover{text-decoration:underline}
+  code{font-family:var(--mono);font-size:.86em;background:var(--panel-2);
+    padding:.08em .38em;border-radius:5px;border:1px solid var(--hair)}
+  :focus-visible{outline:2px solid var(--indigo-2);outline-offset:3px;border-radius:4px}
+
+  /* ---- hero ---- */
+  .hero{position:relative;overflow:hidden;background:var(--ink);color:#e9e8f2;
+    border-bottom:1px solid #000}
+  .hero .wrap{padding:74px 24px 60px;position:relative;z-index:2}
+  .hero canvas{position:absolute;inset:0;width:100%;height:100%;z-index:1;opacity:.5}
+  .eyebrow{font-family:var(--mono);font-size:12.5px;letter-spacing:.22em;
+    text-transform:uppercase;color:var(--indigo-2);margin:0 0 18px}
+  .hero h1{font-size:clamp(38px,7vw,72px);line-height:1.02;margin:0;font-weight:800;
+    letter-spacing:-.03em;text-wrap:balance;color:#f4f3fb}
+  .hero h1 .dim{color:#6f6d8a}
+  .hero .lede{max-width:60ch;margin:22px 0 0;font-size:clamp(16px,2.2vw,19px);
+    color:#bcbad2;line-height:1.6}
+  .hero .meta{display:flex;flex-wrap:wrap;gap:10px;margin-top:30px}
+  .chip{font-family:var(--mono);font-size:12px;letter-spacing:.04em;
+    border:1px solid #34324a;background:#1d1b29;color:#cfcde4;
+    padding:6px 11px;border-radius:999px}
+  .chip b{color:var(--teal-2);font-weight:600}
+
+  /* ---- nav ---- */
+  nav.toc{position:sticky;top:0;z-index:20;background:color-mix(in srgb,var(--paper) 88%,transparent);
+    backdrop-filter:blur(10px);border-bottom:1px solid var(--hair)}
+  nav.toc .wrap{display:flex;gap:2px;overflow-x:auto;padding:0 24px;scrollbar-width:thin}
+  nav.toc a{font-family:var(--mono);font-size:12px;letter-spacing:.03em;color:var(--muted);
+    padding:13px 12px;white-space:nowrap;border-bottom:2px solid transparent}
+  nav.toc a:hover{color:var(--text);text-decoration:none}
+  nav.toc a.on{color:var(--indigo);border-bottom-color:var(--indigo)}
+
+  /* ---- sections on the wire rail ---- */
+  main .wrap{padding:0 24px}
+  section{padding:54px 0 8px;scroll-margin-top:56px}
+  .rail{display:grid;grid-template-columns:64px 1fr;gap:0}
+  @media(max-width:720px){.rail{grid-template-columns:34px 1fr}}
+  .rail .spine{position:relative}
+  .rail .spine::before{content:"";position:absolute;left:15px;top:8px;bottom:-54px;
+    width:2px;background:var(--hair)}
+  @media(max-width:720px){.rail .spine::before{left:15px}}
+  .node{position:relative;width:32px;height:32px;border-radius:50%;
+    background:var(--paper);border:2px solid var(--indigo);
+    display:grid;place-items:center;font-family:var(--mono);font-weight:700;
+    font-size:13px;color:var(--indigo);z-index:1}
+  section:last-child .spine::before{display:none}
+  .col{min-width:0;max-width:var(--rw)}
+  h2{font-size:clamp(24px,3.4vw,33px);letter-spacing:-.02em;margin:2px 0 6px;
+    font-weight:750;text-wrap:balance}
+  h2 .th{display:block;font-size:15px;font-weight:600;color:var(--muted);
+    letter-spacing:0;margin-top:6px}
+  h3{font-size:18px;letter-spacing:-.01em;margin:30px 0 6px;font-weight:700}
+  p{margin:12px 0;color:var(--text)}
+  .col p, .col li{max-width:72ch}
+  ul,ol{padding-left:1.2em;margin:12px 0}
+  li{margin:7px 0}
+  strong{font-weight:680}
+  .lead{font-size:18px;color:var(--muted);max-width:70ch}
+
+  /* callout */
+  .note{border-left:3px solid var(--teal);background:var(--panel);
+    padding:14px 18px;border-radius:0 10px 10px 0;margin:20px 0;font-size:15px}
+  .note.warn{border-left-color:var(--warn)}
+  .note .k{font-family:var(--mono);font-size:11px;letter-spacing:.14em;
+    text-transform:uppercase;color:var(--teal);display:block;margin-bottom:4px}
+  .note.warn .k{color:var(--warn)}
+
+  /* scope panel for diagrams — constant dark in both themes */
+  .scope{background:var(--scope);border:1px solid #000;border-radius:14px;
+    margin:24px 0;overflow:hidden;box-shadow:0 18px 40px -24px rgba(0,0,0,.7)}
+  .scope .bar{display:flex;align-items:center;gap:8px;padding:11px 15px;
+    border-bottom:1px solid var(--scope-line);background:#100f18}
+  .scope .bar .dot{width:9px;height:9px;border-radius:50%}
+  .scope .bar .t{font-family:var(--mono);font-size:11.5px;letter-spacing:.14em;
+    text-transform:uppercase;color:var(--scope-mut);margin-left:6px}
+  .scope .stage{padding:18px 12px;overflow-x:auto}
+  .scope pre.mermaid{margin:0;text-align:center;min-width:min-content;background:transparent}
+
+  /* tables */
+  .tw{overflow-x:auto;margin:22px 0;border:1px solid var(--hair);border-radius:12px}
+  table{border-collapse:collapse;width:100%;font-size:14.5px;min-width:440px}
+  th,td{text-align:left;padding:11px 15px;border-bottom:1px solid var(--hair);vertical-align:top}
+  thead th{font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;
+    color:var(--muted);background:var(--panel);font-weight:600}
+  tbody tr:last-child td{border-bottom:none}
+  tbody tr:hover{background:var(--panel)}
+  td code{white-space:nowrap}
+  .sev{font-family:var(--mono);font-size:11px;font-weight:700;padding:2px 8px;border-radius:5px;
+    letter-spacing:.03em}
+  .sev.g{color:var(--good);background:color-mix(in srgb,var(--good) 15%,transparent)}
+  .sev.w{color:var(--warn);background:color-mix(in srgb,var(--warn) 15%,transparent)}
+  .sev.c{color:var(--crit);background:color-mix(in srgb,var(--crit) 15%,transparent)}
+
+  /* pipeline step list */
+  .steps{list-style:none;padding:0;margin:22px 0;counter-reset:s}
+  .steps li{display:grid;grid-template-columns:30px 1fr;gap:14px;align-items:start;
+    padding:12px 0;border-bottom:1px dashed var(--hair);max-width:none}
+  .steps li:last-child{border-bottom:none}
+  .steps li::before{counter-increment:s;content:counter(s);font-family:var(--mono);
+    font-weight:700;font-size:13px;color:#fff;background:var(--indigo);
+    width:26px;height:26px;border-radius:7px;display:grid;place-items:center;margin-top:1px}
+  .steps li.pass::before{background:var(--faint)}
+  .steps .h{font-weight:680}
+  .steps .d{color:var(--muted);font-size:14.5px}
+  .steps code{font-size:12.5px}
+
+  /* code block */
+  pre.code{font-family:var(--mono);font-size:13px;line-height:1.6;background:var(--ink);
+    color:#d7d5e8;padding:16px 18px;border-radius:12px;overflow-x:auto;margin:20px 0;
+    border:1px solid #000}
+  pre.code .c{color:#6f6d8a}
+  pre.code .k{color:var(--teal-2)}
+  pre.code .p{color:#9a9dff}
+
+  .kv{display:grid;grid-template-columns:auto 1fr;gap:2px 18px;font-size:14px;margin:16px 0}
+  .kv dt{font-family:var(--mono);color:var(--indigo);padding:5px 0}
+  .kv dd{margin:0;padding:5px 0;color:var(--muted)}
+
+  footer{border-top:1px solid var(--hair);margin-top:40px}
+  footer .wrap{padding:34px 24px 60px;color:var(--muted);font-size:14px}
+  footer a{font-family:var(--mono);font-size:13px}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media(max-width:640px){.grid2{grid-template-columns:1fr}}
+</style>
+
+<div class="hero">
+  <canvas id="wire" aria-hidden="true"></canvas>
+  <div class="wrap">
+    <p class="eyebrow">bogbogprox · architecture &amp; the wire</p>
+    <h1>ดักทั้งสาย<span class="dim">.</span><br>อ่านทุกไบต์<span class="dim">.</span></h1>
+    <p class="lede">web security proxy สัญชาติ Rust — คั่นกลาง browser กับ target, ถอดรหัส HTTPS,
+      จับ · แก้ · วิเคราะห์ traffic. เอกสารนี้เจาะว่า <b>ระบบต่อกันยังไง</b> และ
+      <b>browser เชื่อมผ่าน MITM ยังไง</b> ตั้งแต่ TCP จนถึง TLS.</p>
+    <div class="meta">
+      <span class="chip"><b>9</b> crates · Rust workspace</span>
+      <span class="chip">data plane · <b>hudsucker</b></span>
+      <span class="chip">store · <b>SQLite / Postgres</b></span>
+      <span class="chip">plugins · <b>WASM</b> component model</span>
+      <span class="chip">HTTP/1.1 · <b>FIFO</b> correlation</span>
+    </div>
+  </div>
+</div>
+
+<nav class="toc" aria-label="สารบัญ">
+  <div class="wrap" id="tocnav">
+    <a href="#overview">ภาพรวม</a>
+    <a href="#crates">Crates</a>
+    <a href="#planes">Data / Control</a>
+    <a href="#lifecycle">Lifecycle</a>
+    <a href="#browser">Browser · MITM</a>
+    <a href="#storage">Storage</a>
+    <a href="#events">Events</a>
+    <a href="#concurrency">Concurrency</a>
+    <a href="#team">Team mode</a>
+    <a href="#plugins">Plugins</a>
+    <a href="#security">Security</a>
+    <a href="#run">Running</a>
+  </div>
+</nav>
+
+<main>
+<div class="wrap">
+
+  <!-- 1 -->
+  <section id="overview"><div class="rail">
+    <div class="spine"><div class="node">1</div></div>
+    <div class="col">
+      <h2>ภาพรวม &amp; หลักการ<span class="th">System overview &amp; design principles</span></h2>
+      <p class="lead">bogbogprox นั่งคั่นกลางระหว่าง browser กับ target — decrypt HTTPS แล้วเปิดทางให้คุณ
+        เห็น จับ แก้ และสแกน traffic ทุกอย่าง. โมเดลเดียวกับ Burp classic แต่เขียนใหม่ทั้งกองด้วย Rust.</p>
+
+      <div class="tw"><table>
+        <thead><tr><th>หลักการ</th><th>ทำจริงยังไง</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Ports &amp; adapters</strong></td><td>logic อยู่หลัง trait; สลับ storage/engine ได้ (SQLite ↔ Postgres) โดยไม่แตะ caller</td></tr>
+          <tr><td><strong>Local-first</strong></td><td>binary เดียว: รัน local (SQLite) แล้วรันตัวเดิมเป็น team (Postgres) แค่เปลี่ยน flag</td></tr>
+          <tr><td><strong>Thin frontends</strong></td><td>TUI / Web / Desktop คุยผ่าน REST+SSE เดียวกัน — ไม่มี logic ของตัวเอง</td></tr>
+          <tr><td><strong>Blocking-friendly async</strong></td><td>proxy บน tokio; งาน blocking (store/plugin) ไปรันบน worker หรือ actor thread</td></tr>
+          <tr><td><strong>Deny-by-default</strong></td><td>CA เฉพาะเครื่อง · auth token · plugin sandbox · body limit · perms 0600/0700</td></tr>
+        </tbody>
+      </table></div>
+
+      <div class="scope">
+        <div class="bar"><span class="dot" style="background:#f0685a"></span><span class="dot" style="background:#e0a63a"></span><span class="dot" style="background:#46c47e"></span><span class="t">bird's-eye · data flow</span></div>
+        <div class="stage"><pre class="mermaid">
+%%{init:{'theme':'base','themeVariables':{'background':'#15141d','primaryColor':'#201e2e','primaryTextColor':'#e7e5f0','primaryBorderColor':'#8b90ff','lineColor':'#6f6d8a','secondaryColor':'#17313a','tertiaryColor':'#1a1826','fontFamily':'ui-monospace, monospace','fontSize':'14px'}}}%%
+flowchart LR
+  B["Browser / curl / tool"] -->|"proxy :8888"| E["snare-engine<br/>data plane · hudsucker"]
+  E -->|"MITM TLS"| T["Target site"]
+  E --> C["snare-core<br/>intercept · rules · scanner<br/>session · ws · plugins"]
+  C --> S[("Store<br/>SQLite / Postgres")]
+  C --> EV(("Event bus"))
+  EV -->|SSE| UI["Web · TUI · Desktop"]
+  EV -->|MCP| AI["Claude / AI"]
+        </pre></div>
+      </div>
+    </div>
+  </div></section>
+
+  <!-- 2 -->
+  <section id="crates"><div class="rail">
+    <div class="spine"><div class="node">2</div></div>
+    <div class="col">
+      <h2>แผนที่ crate<span class="th">Workspace structure · 9 crates</span></h2>
+      <p>logic แกนอยู่ใน <code>snare-core</code> — ไม่รู้จัก proxy, HTTP หรือ DB เลย. ทุกอย่างพึ่ง core;
+        adapter พึ่ง core; แล้ว <code>snared</code> ประกอบทุกชิ้นเข้าด้วยกัน. เปลี่ยน backend หรือเพิ่ม frontend
+        จึงไม่กระเทือนแกน.</p>
+<pre class="code"><span class="c">crates/</span>
+<span class="p">snare-core</span>            <span class="c"># โมเดล + trait + coordinators (ไม่มี I/O ของ proxy)</span>
+  ├ model            <span class="c">#   Flow / HttpRequest / HttpResponse / FlowEvent</span>
+  ├ store            <span class="c">#   trait FlowStore  ← storage port</span>
+  ├ intercept        <span class="c">#   breakpoint coordinator (oneshot ต่อ item)</span>
+  ├ rules            <span class="c">#   Match &amp; Replace (regex + {{var}})</span>
+  ├ scanner          <span class="c">#   passive findings + dedup</span>
+  ├ session          <span class="c">#   Vars + Macros</span>
+  └ ws               <span class="c">#   WsLog (WebSocket messages)</span>
+<span class="p">snare-store-sqlite</span>    <span class="c"># FlowStore ← SQLite (Mutex&lt;Connection&gt;)   [local]</span>
+<span class="p">snare-store-postgres</span>  <span class="c"># FlowStore ← Postgres (DB-actor thread)   [team]</span>
+<span class="p">snare-engine</span>          <span class="c"># data plane: hudsucker (hyper+rustls) + capture + hooks</span>
+<span class="p">snare-plugin</span>          <span class="c"># WASM plugin host (wasmtime component model)</span>
+<span class="p">snared</span>                <span class="c"># the daemon: engine + REST/SSE + auth + config + pubsub</span>
+<span class="p">snare-tui</span>             <span class="c"># ratatui frontend (REST+SSE client)</span>
+<span class="p">snare-desktop</span>         <span class="c"># Tauri native window → dashboard</span>
+<span class="p">snare-mcp</span>             <span class="c"># stdio MCP server (AI ขับผ่าน API)</span></pre>
+    </div>
+  </div></section>
+
+  <!-- 3 -->
+  <section id="planes"><div class="rail">
+    <div class="spine"><div class="node">3</div></div>
+    <div class="col">
+      <h2>Data plane vs Control plane<span class="th">สองระนาบที่แชร์ coordinator ชุดเดียว</span></h2>
+      <p>แยกชัดสองระนาบ แต่ทั้งคู่ถือ <strong>coordinator ตัวเดียวกัน</strong> ผ่าน <code>Arc</code> —
+        นี่คือกลไกที่ทำให้ "กดปุ่มบน dashboard" ไปมีผลกับ "traffic ที่กำลังวิ่ง" ได้ทันที.</p>
+      <ul>
+        <li><strong>Data plane</strong> (<code>snare-engine</code>) — เส้นที่ traffic จริงวิ่ง. ต้องเร็ว, ต่อ connection. hudsucker เรียก handler ต่อ request/response.</li>
+        <li><strong>Control plane</strong> (<code>snared</code> REST/SSE) — คน/AI สั่งงาน: toggle intercept, add rule, ยิง intruder.</li>
+      </ul>
+      <div class="scope">
+        <div class="bar"><span class="dot" style="background:#f0685a"></span><span class="dot" style="background:#e0a63a"></span><span class="dot" style="background:#46c47e"></span><span class="t">shared coordinators (Arc)</span></div>
+        <div class="stage"><pre class="mermaid">
+%%{init:{'theme':'base','themeVariables':{'background':'#15141d','primaryColor':'#201e2e','primaryTextColor':'#e7e5f0','primaryBorderColor':'#8b90ff','lineColor':'#6f6d8a','clusterBkg':'#141320','clusterBorder':'#34324a','fontFamily':'ui-monospace, monospace','fontSize':'13px'}}}%%
+flowchart TB
+  subgraph DP["DATA PLANE · snare-engine"]
+    H["CaptureHandler<br/>per connection"]
+  end
+  subgraph SH["SHARED · snare-core (Arc)"]
+    IC["Intercept"]; RU["Rules"]; SC["Scanner"]; VA["Vars"]; PL["PluginHost"]; BUS(("events"))
+  end
+  subgraph CP["CONTROL PLANE · snared axum"]
+    API["REST /api/v1/*"]; SSE["SSE /stream"]
+  end
+  H --- IC & RU & SC & VA & PL & BUS
+  API --- IC & RU & SC & VA & PL
+  BUS --> SSE
+        </pre></div>
+      </div>
+    </div>
+  </div></section>
+
+  <!-- 4 -->
+  <section id="lifecycle"><div class="rail">
+    <div class="spine"><div class="node">4</div></div>
+    <div class="col">
+      <h2>วงจรชีวิต request / response<span class="th">ลำดับ hook — สำคัญมาก</span></h2>
+      <p>หัวใจอยู่ที่ <code>handle_request</code> / <code>handle_response</code>. แต่ละชั้นทำ
+        <em>ก่อน</em>ชั้นถัดไป — ลำดับนี้คือ contract ของทั้งระบบ:</p>
+
+      <h3>ขาไป — request</h3>
+      <ol class="steps">
+        <li class="pass"><div><span class="h">CONNECT?</span> <span class="d">→ ปล่อยผ่าน ตั้ง TLS tunnel</span></div></li>
+        <li class="pass"><div><span class="h"><code>Upgrade: websocket</code>?</span> <span class="d">→ ปล่อยผ่านไป WS handler</span></div></li>
+        <li><div><span class="h">buffer body</span> <span class="d">≤ 16 MiB — เกินตั้ง <code>body_truncated</code></span></div></li>
+        <li><div><span class="h">Match &amp; Replace</span> <span class="d"><code>apply_request</code> + expand <code>{{var}}</code></span></div></li>
+        <li><div><span class="h">Plugins <code>on_request</code></span> <span class="d">ข้ามถ้า body truncated</span></div></li>
+        <li><div><span class="h">Intercept</span> <span class="d">ถ้า on &amp; in-scope → await การตัดสินใจของคน</span></div></li>
+        <li><div><span class="h">rebuild_parts</span> <span class="d">ถ้า <code>dirty</code> → สร้าง wire ใหม่</span></div></li>
+        <li><div><span class="h">store.insert_request</span> <span class="d">เก็บ "ที่ส่งจริง" + broadcast <code>FlowNew</code> → forward</span></div></li>
+      </ol>
+
+      <h3>ขากลับ — response</h3>
+      <ol class="steps">
+        <li><div><span class="h">buffer body</span> <span class="d">≤ 16 MiB</span></div></li>
+        <li><div><span class="h">Match &amp; Replace</span> <span class="d"><code>apply_response</code></span></div></li>
+        <li><div><span class="h">Plugins <code>on_response</code></span></div></li>
+        <li><div><span class="h">Intercept response</span> <span class="d">ถ้า on</span></div></li>
+        <li><div><span class="h">store.attach_response</span> <span class="d">+ broadcast <code>FlowUpdate</code></span></div></li>
+        <li><div><span class="h">Scanner.scan</span> <span class="d">→ broadcast <code>Finding</code> → ตอบ browser</span></div></li>
+      </ol>
+
+      <div class="scope">
+        <div class="bar"><span class="dot" style="background:#f0685a"></span><span class="dot" style="background:#e0a63a"></span><span class="dot" style="background:#46c47e"></span><span class="t">sequence · one request round-trip</span></div>
+        <div class="stage"><pre class="mermaid">
+%%{init:{'theme':'base','themeVariables':{'background':'#15141d','primaryColor':'#201e2e','primaryTextColor':'#e7e5f0','primaryBorderColor':'#8b90ff','lineColor':'#8b90ff','actorBkg':'#221f33','actorBorder':'#8b90ff','actorTextColor':'#e7e5f0','signalColor':'#a9a7c0','signalTextColor':'#cfcde4','noteBkgColor':'#17313a','noteTextColor':'#cfe9e4','noteBorderColor':'#3ecbb9','fontFamily':'ui-monospace, monospace','fontSize':'12.5px'}}}%%
+sequenceDiagram
+  participant Br as Browser
+  participant Eng as Engine
+  participant Core as Coordinators
+  participant Tg as Target
+  Br->>Eng: request (via proxy)
+  Note over Eng: CONNECT → TLS tunnel · WS → passthrough
+  Eng->>Core: 1 · Match & Replace
+  Eng->>Core: 2 · Plugins on_request
+  Eng->>Core: 3 · Intercept (await decision)
+  Note over Eng: dirty? → rebuild wire
+  Eng->>Core: store.insert_request + FlowNew
+  Eng->>Tg: forward
+  Tg-->>Eng: response
+  Eng->>Core: 4 · M&R · 5 · Plugins · 6 · Intercept
+  Eng->>Core: attach_response + FlowUpdate
+  Eng->>Core: 7 · Scanner.scan → Finding
+  Eng-->>Br: response
+        </pre></div>
+      </div>
+
+      <div class="note"><span class="k">ทำไมถึงถูกต้อง</span>
+        เก็บ request <em>หลัง</em> decision → history เห็นสิ่งที่ส่งจริง · <code>dirty</code> flag rebuild เฉพาะเมื่อมีชั้นแก้ →
+        ไม่เสีย perf ตอนไม่แก้ · truncated body ข้าม M&amp;R/plugin → กัน unsafe partial replay.</div>
+    </div>
+  </div></section>
+
+  <!-- 5 BROWSER -->
+  <section id="browser"><div class="rail">
+    <div class="spine"><div class="node">5</div></div>
+    <div class="col">
+      <h2>🌐 Browser integration เชิงลึก<span class="th">proxy protocol · CONNECT · TLS MITM · CA · managed browser</span></h2>
+      <div class="note"><span class="k">ตั้งต้นให้ตรง</span>
+        bogbogprox <strong>ไม่มี browser ของตัวเอง</strong> — มันคือ HTTP proxy ที่ browser (ของคุณ) ชี้มาหา
+        เหมือน Burp classic. ส่วนนี้อธิบายตั้งแต่ TCP จนถึง TLS MITM.</div>
+
+      <h3>5.1 · browser เชื่อมยังไง — proxy protocol</h3>
+      <p>ตั้ง browser ให้ใช้ HTTP proxy <code>127.0.0.1:8888</code> แล้ว:</p>
+      <ul>
+        <li><strong>HTTP ธรรมดา</strong> — browser ส่งแบบ <em>absolute-form</em>: <code>GET http://site/path</code> ให้ proxy อ่าน host จาก URI แล้ว forward</li>
+        <li><strong>HTTPS</strong> — browser ส่ง <code>CONNECT site:443</code> ขอ tunnel ก่อน. ปกติ proxy จะเปิดท่อเฉยๆ ไม่เห็นเนื้อ — <strong>แต่เราจะ MITM</strong></li>
+      </ul>
+
+      <div class="scope">
+        <div class="bar"><span class="dot" style="background:#f0685a"></span><span class="dot" style="background:#e0a63a"></span><span class="dot" style="background:#46c47e"></span><span class="t">CONNECT + TLS interception</span></div>
+        <div class="stage"><pre class="mermaid">
+%%{init:{'theme':'base','themeVariables':{'background':'#15141d','primaryColor':'#201e2e','primaryTextColor':'#e7e5f0','primaryBorderColor':'#8b90ff','lineColor':'#8b90ff','actorBkg':'#221f33','actorBorder':'#8b90ff','actorTextColor':'#e7e5f0','signalColor':'#a9a7c0','signalTextColor':'#cfcde4','noteBkgColor':'#17313a','noteTextColor':'#cfe9e4','noteBorderColor':'#3ecbb9','fontFamily':'ui-monospace, monospace','fontSize':'12.5px'}}}%%
+sequenceDiagram
+  participant Br as Browser
+  participant Px as bogbogprox :8888
+  participant Tg as site:443
+  Br->>Px: CONNECT site:443
+  Px-->>Br: 200 Connection established
+  Note over Px: แทนที่จะเปิดท่อเฉยๆ<br/>Px สวมเป็น "site" (MITM)
+  Br->>Px: TLS ClientHello (คิดว่าคุยกับ site)
+  Px-->>Br: leaf cert ออกสดๆ · ลงนามด้วย Snare CA
+  Px->>Tg: เปิด TLS เส้นที่สองไป site จริง (verify cert จริง)
+  Br->>Px: (decrypted) GET /path
+  Px->>Tg: forward
+        </pre></div>
+      </div>
+
+      <h3>5.2 · TLS MITM ทำยังไง (hudsucker)</h3>
+      <ol class="steps">
+        <li><div><span class="h">รับ CONNECT → ตอบ 200</span> <span class="d">เริ่ม TLS handshake กับ browser โดยสวมเป็น site</span></div></li>
+        <li><div><span class="h">ออก leaf cert ของ site สดๆ (rcgen)</span> <span class="d">ลงนามด้วย Snare CA แล้ว cache ไว้</span></div></li>
+        <li><div><span class="h">browser handshake สำเร็จ</span> <span class="d">เพราะ trust Snare CA → คุย plaintext กับ proxy</span></div></li>
+        <li><div><span class="h">proxy อ่าน request ที่ decrypt แล้ว</span> <span class="d">มาถึง handler เป็น origin-form · เปิด TLS เส้นสองไป site จริง · forward</span></div></li>
+      </ol>
+      <p>ผลคือ proxy <strong>เห็นและแก้ HTTPS ได้เต็ม</strong> ทั้งที่ browser กับ site ยังคิดว่าคุย TLS ปกติ.</p>
+
+      <h3>5.3 · CA &amp; trust — ทำไมต้องติดตั้ง cert</h3>
+      <p>Snare สร้าง <strong>CA เฉพาะเครื่อง</strong> (<code>snared ca generate</code> → <code>~/.config/snare/ca/snare-ca.pem</code> + <code>.key</code> perms 0600).
+        leaf cert ทุกใบลงนามด้วย CA นี้; browser จะ trust ก็ต่อเมื่อ <strong>ติดตั้ง <code>snare-ca.pem</code> ใน trust store</strong>.</p>
+      <div class="note warn"><span class="k">ระวัง</span>
+        ห้ามแชร์/commit CA นี้ — ใครมี key = MITM traffic ของคุณได้. <code>.gitignore</code> กัน <code>*.key/*.pem</code> ไว้แล้ว.
+        ถ้าไม่ติดตั้ง → browser ขึ้น cert error.</div>
+
+      <h3>5.4 · managed browser — <code>snared browser</code></h3>
+      <p>เพื่อความสะดวก (เหมือน Burp embedded browser) มี subcommand เปิด Chromium ที่ตั้งค่าให้เสร็จ:</p>
+<pre class="code"><span class="k">snared browser</span> --url https://target.com
+<span class="c"># = chromium --proxy-server=http://127.0.0.1:8888 \</span>
+<span class="c">#            --ignore-certificate-errors \</span>
+<span class="c">#            --user-data-dir=&lt;throwaway&gt; ...</span></pre>
+      <div class="kv">
+        <dt>throwaway profile</dt><dd>ไม่แตะ browser จริงของคุณ</dd>
+        <dt>ignore-cert-errors</dt><dd>ยอมรับ MITM cert โดยไม่ต้องติดตั้ง CA — เหมาะ <em>เฉพาะ testing</em></dd>
+        <dt>auto-detect</dt><dd>หา binary: chromium → chrome → brave</dd>
+      </div>
+
+      <h3>5.5 · WebSocket</h3>
+      <p><code>Upgrade: websocket</code> ถูกปล่อยผ่าน <strong>ไม่ buffer</strong> (ไม่งั้นรบกวน upgrade);
+        hudsucker dispatch ไป <code>WsHandler</code> แยก — แต่ละ message log ที่ <code>WsLog</code> แล้ว broadcast <code>WsMessage</code>.
+        <code>wss://</code> MITM ได้ผ่าน CONNECT+TLS เหมือน HTTPS.</p>
+
+      <h3>5.6 · ทำไม HTTP/1.1 อย่างเดียว</h3>
+      <p>build hudsucker <strong>ไม่เปิด feature <code>http2</code></strong> โดยตั้งใจ → ทั้ง browser (ALPN) และ upstream เป็น h1.
+        ผลดี: request บน connection เดียว <em>serialize</em> ไม่ multiplex → จับคู่ req↔resp แบบ <strong>FIFO</strong> ถูกต้อง 100%
+        โดยไม่ต้องมี stream-id correlation. แลกกับบางไซต์ที่ชอบ h2 อาจ behave ต่างเล็กน้อย (ทุกไซต์รองรับ h1 fallback).</p>
+    </div>
+  </div></section>
+
+  <!-- 6 -->
+  <section id="storage"><div class="rail">
+    <div class="spine"><div class="node">6</div></div>
+    <div class="col">
+      <h2>Storage architecture<span class="th">FlowStore port · SQLite mutex · Postgres DB-actor</span></h2>
+      <p><strong>Port:</strong> <code>trait FlowStore</code> — <code>insert_request / attach_response / list_flows / get_flow / count / clear</code>.
+        method เป็น <em>sync</em> (เรียกจาก async engine แบบ blocking — ยอมรับได้).</p>
+      <div class="grid2">
+        <div class="note"><span class="k">SQLite · local</span>
+          <code>Arc&lt;Mutex&lt;Connection&gt;&gt;</code> (single-writer), WAL mode, headers เป็น JSON, body เป็น BLOB, perms 0600.</div>
+        <div class="note"><span class="k">Postgres · team</span>
+          sync client มี tokio runtime ของตัวเอง → เรียกใน tokio worker = <strong>panic</strong>. แก้ด้วย DB-actor thread.</div>
+      </div>
+
+      <div class="scope">
+        <div class="bar"><span class="dot" style="background:#f0685a"></span><span class="dot" style="background:#e0a63a"></span><span class="dot" style="background:#46c47e"></span><span class="t">DB-actor pattern (Postgres)</span></div>
+        <div class="stage"><pre class="mermaid">
+%%{init:{'theme':'base','themeVariables':{'background':'#15141d','primaryColor':'#201e2e','primaryTextColor':'#e7e5f0','primaryBorderColor':'#8b90ff','lineColor':'#6f6d8a','fontFamily':'ui-monospace, monospace','fontSize':'13px'}}}%%
+flowchart LR
+  A["async worker<br/>FlowStore call"] -->|"closure + reply channel"| ACT["DB-actor thread<br/>std::thread · ไม่ใช่ tokio"]
+  ACT -->|"sync query"| PG[("Postgres")]
+  ACT -->|"reply · block รอผล"| A
+        </pre></div>
+      </div>
+      <div class="note warn"><span class="k">schema init race</span>
+        หลาย daemon start พร้อมกันบน DB ว่าง race กันที่ <code>CREATE TABLE IF NOT EXISTS</code> (pg_type unique violation) →
+        กันด้วย <code>pg_advisory_lock</code> เป็น statement แยก autocommit ก่อน DDL.</div>
+      <p><strong>Config backend:</strong> <code>Backend { Local(file) | Postgres }</code> — rules/scope/vars/macros/scanner persist เป็น
+        <code>config.json</code> (local) หรือตาราง <code>snare_settings</code> (team, แชร์กัน).</p>
+    </div>
+  </div></section>
+
+  <!-- 7 -->
+  <section id="events"><div class="rail">
+    <div class="spine"><div class="node">7</div></div>
+    <div class="col">
+      <h2>Event system<span class="th">local broadcast → SSE → cross-process NOTIFY</span></h2>
+      <p><strong>ในเครื่องเดียว:</strong> ทุกเหตุการณ์เป็น <code>FlowEvent</code> ยิงเข้า <code>broadcast::channel</code> —
+        <code>FlowNew · FlowUpdate · Activity · Intercept* · Finding · WsMessage · ConfigChanged · Presence</code>.
+        SSE endpoint subscribe แล้วส่ง <code>data: &lt;json&gt;</code> ให้ทุก client.</p>
+      <p><strong>ข้ามหลาย daemon (topology B):</strong> relay ผ่าน Postgres LISTEN/NOTIFY —
+        publisher tag event ด้วย <em>origin id สุ่ม</em>; listener ข้าม event ของ origin ตัวเอง → กัน echo.</p>
+      <div class="scope">
+        <div class="bar"><span class="dot" style="background:#f0685a"></span><span class="dot" style="background:#e0a63a"></span><span class="dot" style="background:#46c47e"></span><span class="t">cross-process fan-out · anti-echo</span></div>
+        <div class="stage"><pre class="mermaid">
+%%{init:{'theme':'base','themeVariables':{'background':'#15141d','primaryColor':'#201e2e','primaryTextColor':'#e7e5f0','primaryBorderColor':'#8b90ff','lineColor':'#6f6d8a','clusterBkg':'#141320','clusterBorder':'#34324a','fontFamily':'ui-monospace, monospace','fontSize':'12.5px'}}}%%
+flowchart LR
+  subgraph DA["daemon A"]
+    LA(("local bus")) -->|"publish +origin=A"| PGN[("NOTIFY snare_events")]
+    PGN -->|LISTEN| RA(("remote bus A"))
+    LA --> SA["SSE (A)"]
+  end
+  subgraph DB2["daemon B"]
+    PGN -->|LISTEN| RB(("remote bus B")) --> SB["SSE (B)"]
+  end
+        </pre></div>
+      </div>
+    </div>
+  </div></section>
+
+  <!-- 8 -->
+  <section id="concurrency"><div class="rail">
+    <div class="spine"><div class="node">8</div></div>
+    <div class="col">
+      <h2>Concurrency model<span class="th">อะไรรันบนอะไร · เพราะอะไร</span></h2>
+      <div class="tw"><table>
+        <thead><tr><th>งาน</th><th>รันบน</th><th>เหตุผล</th></tr></thead>
+        <tbody>
+          <tr><td>Proxy connections (I/O-bound)</td><td><code>tokio</code> async</td><td>ไม่บล็อก, scale พันคอนเนกชัน</td></tr>
+          <tr><td>Store call · SQLite</td><td>tokio worker (blocking)</td><td>rusqlite sync ล้วน — บล็อก worker ชั่วครู่ ยอมรับได้</td></tr>
+          <tr><td>Store call · Postgres</td><td><code>DB-actor thread</code></td><td>sync postgres มี runtime เอง รันใน tokio ไม่ได้</td></tr>
+          <tr><td>LISTEN / NOTIFY</td><td>2 std threads</td><td>connection ค้างไว้รับ notification</td></tr>
+          <tr><td>Plugin hook</td><td>tokio worker (blocking)</td><td>wasmtime Send+Sync; Store สร้าง local ต่อ call</td></tr>
+          <tr><td>Intercept await</td><td>tokio <code>oneshot</code></td><td>request "ค้าง" ใน async task รอ decision จาก API</td></tr>
+        </tbody>
+      </table></div>
+      <p><strong>หลัก:</strong> blocking แต่เร็ว (store) → บล็อก worker ตรงๆ · blocking + มี runtime ของตัวเอง (postgres) → actor thread · ต้องรอคน (intercept) → async await.</p>
+    </div>
+  </div></section>
+
+  <!-- 9 -->
+  <section id="team"><div class="rail">
+    <div class="spine"><div class="node">9</div></div>
+    <div class="col">
+      <h2>Team mode<span class="th">central / scale-out · token auth · presence</span></h2>
+      <ul>
+        <li><strong>Topology A (central, MVP)</strong> — daemon เดียวบน Postgres; ทุกคนชี้ browser + เปิด dashboard เดียว → เห็นสด (SSE broadcast ตัวเดียว)</li>
+        <li><strong>Topology B (scale)</strong> — หลาย daemon ชี้ Postgres เดียว → sync event ข้าม process ผ่าน NOTIFY</li>
+      </ul>
+      <div class="kv">
+        <dt>auth</dt><dd>project token → <code>POST /team/join</code> → session token (getrandom, constant-time); middleware บังคับ <code>Bearer</code> ทุก /api/</dd>
+        <dt>SSE auth</dt><dd>รับ <code>?token=</code> (EventSource ตั้ง header ไม่ได้)</dd>
+        <dt>session</dt><dd>idle timeout 12h + <code>/team/logout</code></dd>
+        <dt>presence</dt><dd>last-seen ต่อ session, online ภายใน 30s, poll <code>/operators</code> ทุก 15s</dd>
+        <dt>config sync</dt><dd>ทุก mutation broadcast <code>ConfigChanged{kind}</code> → client reload panel</dd>
+      </div>
+    </div>
+  </div></section>
+
+  <!-- 10 -->
+  <section id="plugins"><div class="rail">
+    <div class="spine"><div class="node">10</div></div>
+    <div class="col">
+      <h2>Plugin architecture<span class="th">WASM component model · wasmtime · fuel-metered</span></h2>
+      <p><code>snare-plugin</code> เป็น wasmtime component-model host. Contract ผ่าน WIT: plugin export <code>hooks</code>
+        (name/on-request/on-response), host export <code>log</code> capability.</p>
+      <div class="scope">
+        <div class="bar"><span class="dot" style="background:#f0685a"></span><span class="dot" style="background:#e0a63a"></span><span class="dot" style="background:#46c47e"></span><span class="t">sandboxed guest · per-call instance</span></div>
+        <div class="stage"><pre class="mermaid">
+%%{init:{'theme':'base','themeVariables':{'background':'#15141d','primaryColor':'#201e2e','primaryTextColor':'#e7e5f0','primaryBorderColor':'#8b90ff','lineColor':'#6f6d8a','clusterBkg':'#141320','clusterBorder':'#34324a','fontFamily':'ui-monospace, monospace','fontSize':'12.5px'}}}%%
+flowchart LR
+  ENG["engine handle_request"] -->|"Req"| ST
+  subgraph H["snare-plugin · host"]
+    L["load .wasm from plugins/"] --> ST["per-call:<br/>new Store + fuel 200M<br/>+ instantiate"]
+  end
+  ST -->|"on-request"| G["guest component<br/>Rust / Go / JS → WASM"]
+  G -->|"log cap"| H
+  G -->|"Unchanged / Forward / Drop"| ENG
+        </pre></div>
+      </div>
+      <ul>
+        <li><strong>Sandbox by default</strong> — guest ทำ syscall/net/fs เองไม่ได้ ต้องผ่าน host cap; WASI จำกัดสุด</li>
+        <li><strong>Fuel 200M instr/call</strong> — runaway plugin trap ไม่ทำ proxy ค้าง; trap → log + ข้าม</li>
+        <li><strong>Instantiate-per-call (stateless)</strong> → host เป็น Send+Sync เรียกจาก async engine ตรงๆ ได้</li>
+        <li>Hook เสียบ <em>หลัง M&amp;R ก่อน intercept</em> (request) · Forward → dirty rebuild · Drop → 403</li>
+        <li>สถานะ: <strong>P1</strong> (on-request/response + log). ถัดไป P2 passive-scan + add-finding, P3 http-send/vars/kv</li>
+      </ul>
+    </div>
+  </div></section>
+
+  <!-- 11 -->
+  <section id="security"><div class="rail">
+    <div class="spine"><div class="node">11</div></div>
+    <div class="col">
+      <h2>Security model<span class="th">deny-by-default ทุกชั้น</span></h2>
+      <div class="tw"><table>
+        <thead><tr><th>ชั้น</th><th>มาตรการ</th><th></th></tr></thead>
+        <tbody>
+          <tr><td>MITM CA</td><td>เฉพาะเครื่อง · key 0600 · ไม่ commit · leaf cert cache ต่อ host</td><td><span class="sev g">local</span></td></tr>
+          <tr><td>API / team auth</td><td>project → session token (getrandom, constant-time) · middleware · idle 12h · logout · secrets ผ่าน env</td><td><span class="sev g">authed</span></td></tr>
+          <tr><td>Plugin</td><td>WASM sandbox · capability deny-by-default · fuel/epoch/mem limit · trap → disable</td><td><span class="sev g">sandbox</span></td></tr>
+          <tr><td>Body</td><td>capture ≤ 16 MiB + <code>body_truncated</code> · ห้าม replay body ที่ truncated</td><td><span class="sev w">bounded</span></td></tr>
+          <tr><td>Match &amp; Replace</td><td>ไม่ทำ binary body เสีย (bail ถ้า non-UTF8) · escape <code>$→$$</code> กัน regex-ref injection</td><td><span class="sev w">safe</span></td></tr>
+          <tr><td>Filesystem</td><td>config/data/ca dir 0700 · db/wal/shm 0600</td><td><span class="sev g">0600</span></td></tr>
+          <tr><td>Transport (team)</td><td>API/SSE เป็น http — ต้องวางหลัง TLS/reverse-proxy ก่อน expose</td><td><span class="sev c">TLS req</span></td></tr>
+        </tbody>
+      </table></div>
+    </div>
+  </div></section>
+
+  <!-- 12 -->
+  <section id="run"><div class="rail">
+    <div class="spine"><div class="node">12</div></div>
+    <div class="col">
+      <h2>Running modes &amp; config<span class="th">local · team · เครื่องมือ</span></h2>
+<pre class="code"><span class="c"># Local (SQLite, ไม่มี auth)</span>
+<span class="k">snared run</span>                       <span class="c"># proxy :8888 · dashboard :9000</span>
+
+<span class="c"># Team (Postgres + auth) — secrets ผ่าน env</span>
+<span class="p">SNARE_POSTGRES</span>=postgres://snare:snare@host/snare \
+<span class="p">SNARE_AUTH_TOKEN</span>=SECRET <span class="k">snared run</span>
+
+<span class="c"># เปลี่ยนพอร์ต</span>
+<span class="k">snared run</span> --proxy 127.0.0.1:9999 --api 127.0.0.1:9001
+
+<span class="c"># เครื่องมืออื่น</span>
+<span class="k">snared</span> ca generate | ca path          <span class="c"># CA</span>
+<span class="k">snared</span> browser --url https://target   <span class="c"># managed browser</span>
+<span class="k">snared</span> flows | flush                   <span class="c"># CLI</span>
+<span class="k">snare-tui</span> [--api https://.. --token ..]
+<span class="k">snare-desktop</span>                        <span class="c"># native window</span>
+<span class="k">snare-mcp</span>                            <span class="c"># MCP (env SNARE_API / SNARE_TOKEN)</span></pre>
+      <div class="kv">
+        <dt>~/.config/snare/ca/</dt><dd>CA (override ทั้งหมดด้วย <code>SNARE_HOME</code>)</dd>
+        <dt>~/.config/snare/config.json</dt><dd>settings</dd>
+        <dt>~/.config/snare/plugins/*.wasm</dt><dd>plugins</dd>
+        <dt>~/.local/share/snare/flows.sqlite</dt><dd>flows (local)</dd>
+        <dt>ports</dt><dd>proxy 8888 · API+dashboard 9000 · Postgres 5432</dd>
+      </div>
+    </div>
+  </div></section>
+
+</div>
+</main>
+
+<footer><div class="wrap">
+  เอกสารนี้อธิบายสถาปัตยกรรมที่ <strong>implement จริง</strong>. ส่วนวิสัยทัศน์ 57 sections ดู
+  <a href="DESIGN.md">DESIGN.md</a> · วิธีใช้ทีละฟีเจอร์ <a href="USAGE.md">USAGE.md</a> ·
+  ดีไซน์ team mode / plugins <a href="design/">design/</a>.
+  <div style="margin-top:14px;font-family:var(--mono);font-size:12px;color:var(--faint)">
+    bogbogprox · github.com/jobpatiphan/bogbogprox
+  </div>
+</div></footer>
+
+<script>
+  // scrollspy for the top nav
+  (function(){
+    var links = [].slice.call(document.querySelectorAll('#tocnav a'));
+    var map = {};
+    links.forEach(function(a){ map[a.getAttribute('href').slice(1)] = a; });
+    var obs = new IntersectionObserver(function(es){
+      es.forEach(function(e){
+        if(e.isIntersecting){
+          links.forEach(function(l){l.classList.remove('on');});
+          var a = map[e.target.id]; if(a){ a.classList.add('on');
+            a.scrollIntoView({block:'nearest',inline:'center'}); }
+        }
+      });
+    }, {rootMargin:'-45% 0px -50% 0px'});
+    document.querySelectorAll('section[id]').forEach(function(s){obs.observe(s);});
+  })();
+
+  // hero: traveling packets along a wire — decorative, respects reduced-motion
+  (function(){
+    var c = document.getElementById('wire'); if(!c) return;
+    var ctx = c.getContext('2d'), W, H, dpr = Math.min(devicePixelRatio||1, 2);
+    var reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    function size(){ W=c.clientWidth; H=c.clientHeight; c.width=W*dpr; c.height=H*dpr; ctx.setTransform(dpr,0,0,dpr,0,0); }
+    size(); addEventListener('resize', size);
+    var lanes = 5, packets = [];
+    for(var i=0;i<lanes;i++){
+      for(var j=0;j<3;j++) packets.push({lane:i, x:Math.random(), sp:0.0007+Math.random()*0.0012, hue:i%2?'#6c72ff':'#29b6a6'});
+    }
+    function laneY(i){ return H*(0.16 + i*0.68/(lanes-1)); }
+    function frame(){
+      ctx.clearRect(0,0,W,H);
+      for(var i=0;i<lanes;i++){
+        var y=laneY(i);
+        ctx.strokeStyle='rgba(120,118,150,0.14)'; ctx.lineWidth=1;
+        ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke();
+      }
+      packets.forEach(function(p){
+        if(!reduce) p.x += p.sp; if(p.x>1.05) p.x=-0.05;
+        var y=laneY(p.lane), x=p.x*W;
+        var g=ctx.createRadialGradient(x,y,0,x,y,26);
+        g.addColorStop(0,p.hue); g.addColorStop(1,'rgba(0,0,0,0)');
+        ctx.fillStyle=g; ctx.beginPath(); ctx.arc(x,y,26,0,7); ctx.fill();
+        ctx.fillStyle=p.hue; ctx.beginPath(); ctx.arc(x,y,2.2,0,7); ctx.fill();
+      });
+      if(!reduce) requestAnimationFrame(frame);
+    }
+    frame();
+  })();
+</script>
