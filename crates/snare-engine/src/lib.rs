@@ -108,9 +108,28 @@ struct CaptureHandler {
     rules: Arc<Rules>,
     scanner: Arc<Scanner>,
     vars: Arc<Vars>,
+    plugins: Arc<snare_plugin::PluginHost>,
     /// Outstanding (flow_id, started, host) tuples, oldest first. Host lets
     /// response interception honour scope.
     pending: VecDeque<(i64, Instant, String)>,
+}
+
+/// Map an edited plugin request back onto the engine model (host/scheme/port are
+/// kept — the MITM connection already targets the original host).
+fn apply_plugin_req(req: &mut HttpRequest, edited: snare_plugin::Req) {
+    req.method = edited.method;
+    req.headers = edited.headers;
+    req.body = edited.body;
+    if let Ok(uri) = edited.url.parse::<Uri>() {
+        req.path = uri.path().to_string();
+        req.query = uri.query().map(|q| q.to_string());
+    }
+}
+
+fn apply_plugin_resp(resp: &mut HttpResponse, edited: snare_plugin::Resp) {
+    resp.status = edited.status;
+    resp.headers = edited.headers;
+    resp.body = edited.body;
 }
 
 fn to_headers(map: &hudsucker::hyper::HeaderMap) -> Vec<Header> {
@@ -290,6 +309,33 @@ impl HttpHandler for CaptureHandler {
             .rules
             .apply_request(&mut request, &self.vars.snapshot());
 
+        // WASM plugins: on-request hooks, after M&R and before intercept.
+        // Skipped for truncated bodies (the plugin would see a partial body).
+        if !self.plugins.is_empty() && !request.body_truncated {
+            let preq = snare_plugin::Req {
+                method: request.method.clone(),
+                url: request.url(),
+                headers: request.headers.clone(),
+                body: request.body.clone(),
+            };
+            match self.plugins.on_request(preq) {
+                snare_plugin::Decision::Drop => {
+                    let resp = Response::builder()
+                        .status(StatusCode::FORBIDDEN)
+                        .body(Body::from(Full::new(bytes::Bytes::from_static(
+                            b"dropped by plugin",
+                        ))))
+                        .expect("static drop response");
+                    return resp.into();
+                }
+                snare_plugin::Decision::Forward(edited) => {
+                    apply_plugin_req(&mut request, edited);
+                    dirty = true;
+                }
+                snare_plugin::Decision::Unchanged => {}
+            }
+        }
+
         // Interactive intercept (§5.1): hold the request at the breakpoint until
         // the operator forwards (optionally edited) or drops it.
         if self.intercept.enabled() && self.intercept.in_scope(&request.host) {
@@ -383,6 +429,32 @@ impl HttpHandler for CaptureHandler {
         let mut dirty = self
             .rules
             .apply_response(&mut response, &self.vars.snapshot());
+
+        // WASM plugins: on-response hooks (skipped for truncated bodies).
+        if !self.plugins.is_empty() && !response.body_truncated {
+            let presp = snare_plugin::Resp {
+                status: response.status,
+                headers: response.headers.clone(),
+                body: response.body.clone(),
+            };
+            match self.plugins.on_response(presp) {
+                snare_plugin::Decision::Drop => {
+                    response = HttpResponse {
+                        status: StatusCode::FORBIDDEN.as_u16(),
+                        http_version: response.http_version.clone(),
+                        headers: vec![],
+                        body: b"dropped by plugin".to_vec(),
+                        body_truncated: false,
+                    };
+                    dirty = true;
+                }
+                snare_plugin::Decision::Forward(edited) => {
+                    apply_plugin_resp(&mut response, edited);
+                    dirty = true;
+                }
+                snare_plugin::Decision::Unchanged => {}
+            }
+        }
 
         let entry = self.pending.pop_front();
         let host = entry.as_ref().map(|(_, _, h)| h.as_str()).unwrap_or("");
@@ -514,6 +586,7 @@ pub struct EngineServices {
     pub scanner: Arc<Scanner>,
     pub vars: Arc<Vars>,
     pub wslog: Arc<WsLog>,
+    pub plugins: Arc<snare_plugin::PluginHost>,
 }
 
 /// Run the proxy until `shutdown` resolves.
@@ -530,6 +603,7 @@ where
         scanner,
         vars,
         wslog,
+        plugins,
     } = services;
     let handler = CaptureHandler {
         store,
@@ -538,6 +612,7 @@ where
         rules,
         scanner,
         vars,
+        plugins,
         pending: VecDeque::new(),
     };
     let ws_handler = WsHandler { events, wslog };

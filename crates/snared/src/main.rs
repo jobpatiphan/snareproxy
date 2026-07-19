@@ -94,7 +94,7 @@ fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "snared=info,snare_engine=info".into()),
+                .unwrap_or_else(|_| "snared=info,snare_engine=info,snare_plugin=info".into()),
         )
         .init();
 
@@ -310,6 +310,15 @@ async fn cmd_run(
     }
     println!("  press Ctrl-C to stop");
 
+    // WASM plugins from <config_dir>/plugins (missing dir = none).
+    let plugins = Arc::new(
+        snare_plugin::PluginHost::load_dir(&paths.config_dir.join("plugins"))
+            .context("init plugin host")?,
+    );
+    if !plugins.is_empty() {
+        println!("  plugins   : {}", plugins.names().join(", "));
+    }
+
     let services = EngineServices {
         store: store_dyn,
         events,
@@ -318,6 +327,7 @@ async fn cmd_run(
         scanner,
         vars,
         wslog,
+        plugins,
     };
     snare_engine::run(cfg, services, async {
         let _ = tokio::signal::ctrl_c().await;

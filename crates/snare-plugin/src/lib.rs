@@ -120,14 +120,20 @@ impl PluginHost {
                 }
             }
         }
-        Ok(Self { engine, linker, plugins })
+        Ok(Self {
+            engine,
+            linker,
+            plugins,
+        })
     }
 
     fn load_one(engine: &Engine, linker: &Linker<State>, path: &Path) -> Result<Loaded> {
         let component = Component::from_file(engine, path).context("load component")?;
         // Instantiate once to read the reported name and validate the ABI.
         let mut store = new_store(engine, "loader");
-        let instance = linker.instantiate(&mut store, &component).context("instantiate")?;
+        let instance = linker
+            .instantiate(&mut store, &component)
+            .context("instantiate")?;
         let plugin = Plugin::new(&mut store, &instance)?;
         let name = plugin
             .snare_plugin_hooks()
@@ -192,14 +198,18 @@ impl PluginHost {
         let mut store = new_store(&self.engine, &p.name);
         let instance = self.linker.instantiate(&mut store, &p.component)?;
         let plugin = Plugin::new(&mut store, &instance)?;
-        Ok(plugin.snare_plugin_hooks().call_on_request(&mut store, &to_wit_req(req))?)
+        plugin
+            .snare_plugin_hooks()
+            .call_on_request(&mut store, &to_wit_req(req))
     }
 
     fn call_response(&self, p: &Loaded, resp: &Resp) -> Result<hooks::RespAction> {
         let mut store = new_store(&self.engine, &p.name);
         let instance = self.linker.instantiate(&mut store, &p.component)?;
         let plugin = Plugin::new(&mut store, &instance)?;
-        Ok(plugin.snare_plugin_hooks().call_on_response(&mut store, &to_wit_resp(resp))?)
+        plugin
+            .snare_plugin_hooks()
+            .call_on_response(&mut store, &to_wit_resp(resp))
     }
 }
 
@@ -225,7 +235,12 @@ fn to_wit_req(r: &Req) -> hooks::HttpRequest {
     }
 }
 fn from_wit_req(w: hooks::HttpRequest) -> Req {
-    Req { method: w.method, url: w.url, headers: w.headers, body: w.body }
+    Req {
+        method: w.method,
+        url: w.url,
+        headers: w.headers,
+        body: w.body,
+    }
 }
 fn to_wit_resp(r: &Resp) -> hooks::HttpResponse {
     hooks::HttpResponse {
@@ -235,5 +250,9 @@ fn to_wit_resp(r: &Resp) -> hooks::HttpResponse {
     }
 }
 fn from_wit_resp(w: hooks::HttpResponse) -> Resp {
-    Resp { status: w.status, headers: w.headers, body: w.body }
+    Resp {
+        status: w.status,
+        headers: w.headers,
+        body: w.body,
+    }
 }

@@ -4744,6 +4744,7 @@ dependencies = [
  "hyper",
  "rcgen",
  "snare-core",
+ "snare-plugin",
  "tokio",
  "tracing",
 ]
@@ -4819,6 +4820,7 @@ dependencies = [
  "serde_json",
  "snare-core",
  "snare-engine",
+ "snare-plugin",
  "snare-store-postgres",
  "snare-store-sqlite",
  "tokio",
