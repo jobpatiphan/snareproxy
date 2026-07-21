@@ -879,6 +879,7 @@ Import-Certificate -FilePath bogbogprox-ca.pem `
         `<button id="tointruder" title="Send to Intruder (fuzz)">⚔ Intruder</button>`+
         `<button id="activescan" title="Active scan query params (XSS/SQLi)">🛡 Scan</button>`+
         `<button id="btnNote" title="Annotate for the writeup (comment / highlight)">📝 Note</button>`+
+        `<button id="btnAccess" title="Access-control test — replay without auth (IDOR/BOLA)">🔓 Access</button>`+
         `<span class="m m-${esc(f.request.method)}">${esc(f.request.method)}</span> `+
         `<span class="url">${esc(url)}</span>`;
       $('resend').onclick = () => resend(id);
@@ -887,11 +888,27 @@ Import-Certificate -FilePath bogbogprox-ca.pem `
       $('activescan').onclick = () => activeScan(id);
       const nb=$('btnNote'); if(state.annotations.has(id)) nb.classList.add('on');
       nb.onclick = () => openNote(id);
+      $('btnAccess').onclick = () => accessTest(id);
       renderMeta(state.flows.get(id)?.f);
       renderDetail();
     }catch(e){ $('dHead').innerHTML='<span class="s5">failed to load</span>'; }
   }
 
+  async function accessTest(id){
+    const btn=$('btnAccess'); if(btn){ btn.disabled=true; btn.textContent='🔓 testing…'; }
+    try{
+      const r = await fetch('/api/v1/access/from/'+id, {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ strip:['Cookie','Authorization','X-Auth-Token','X-Session-Token'] })});
+      const d = await r.json();
+      const m = $('dMeta');
+      const cls = d.broken ? 'bad' : (String(d.altered.status).startsWith('4') ? 'ok' : '');
+      const line = `<div class="row" style="color:${d.broken?'var(--err)':'var(--dim)'}">🔓 <b>Access test:</b> `+
+        `orig ${d.original.status}/${d.original.length}b → no-auth ${d.altered.status}/${d.altered.length}b · `+
+        `<b>${esc(d.verdict)}</b></div>`;
+      if(m){ m.innerHTML = line + m.innerHTML; m.classList.add('show'); }
+    }catch(e){}
+    if(btn){ btn.disabled=false; btn.textContent='🔓 Access'; }
+  }
   async function resend(id){
     const btn=$('resend'); if(btn){ btn.disabled=true; btn.textContent='↻ sending…'; }
     try{

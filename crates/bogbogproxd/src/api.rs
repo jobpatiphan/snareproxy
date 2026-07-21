@@ -112,6 +112,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/activity", post(post_activity))
         .route("/api/v1/repeater", post(repeater_custom))
         .route("/api/v1/repeater/from/:id", post(repeater_from))
+        .route("/api/v1/access/from/:id", post(access_from))
         .route(
             "/api/v1/intercept",
             get(intercept_get).post(intercept_toggle),
@@ -425,6 +426,100 @@ async fn repeater_from(State(st): State<AppState>, Path(id): Path<i64>) -> Respo
         Ok(flow) => Json(flow).into_response(),
         Err(e) => err(e),
     }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AccessTest {
+    /// Header names to remove before replay (e.g. "Cookie", "Authorization").
+    #[serde(default)]
+    pub strip: Vec<String>,
+    /// Headers to set/override (e.g. another user's Cookie/Bearer).
+    #[serde(default)]
+    pub headers: Vec<Header>,
+}
+
+/// Access-control (IDOR / BOLA) test: replay a captured request under a different
+/// (or stripped) session and compare the response to the original. If the altered
+/// session still gets the same 2xx content, the endpoint isn't enforcing
+/// ownership — broken access control.
+async fn access_from(
+    State(st): State<AppState>,
+    Path(id): Path<i64>,
+    Json(b): Json<AccessTest>,
+) -> Response {
+    let flow = match st.store.get_flow(id) {
+        Ok(Some(f)) => f,
+        Ok(None) => {
+            return (StatusCode::NOT_FOUND, Json(json!({ "error": "flow not found" })))
+                .into_response()
+        }
+        Err(e) => return err(e),
+    };
+    let r = &flow.request;
+    if r.body_truncated {
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({ "error": "request body was truncated; refusing partial replay" })),
+        )
+            .into_response();
+    }
+    let (orig_status, orig_len) = match &flow.response {
+        Some(resp) => (resp.status, resp.body.len()),
+        None => (0u16, 0usize),
+    };
+
+    // Build the altered headers: strip named ones, then set/override the rest.
+    let mut headers: Vec<Header> = r
+        .headers
+        .iter()
+        .filter(|(k, _)| !b.strip.iter().any(|s| s.eq_ignore_ascii_case(k)))
+        .cloned()
+        .collect();
+    for (k, v) in &b.headers {
+        headers.retain(|(hk, _)| !hk.eq_ignore_ascii_case(k));
+        if !v.is_empty() {
+            headers.push((k.clone(), v.clone()));
+        }
+    }
+
+    let alt = match repeater::send(
+        &st.store,
+        &st.events,
+        bogbogprox_core::model::Source::Repeater,
+        &r.method,
+        &r.url(),
+        &headers,
+        r.body.clone(),
+    )
+    .await
+    {
+        Ok(f) => f,
+        Err(e) => return err(e),
+    };
+    let (alt_status, alt_len) = match &alt.response {
+        Some(resp) => (resp.status, resp.body.len()),
+        None => (0u16, 0usize),
+    };
+
+    // Verdict: same 2xx + similar body length ⇒ broken access control.
+    let both_ok = (200..300).contains(&orig_status) && (200..300).contains(&alt_status);
+    let len_similar = orig_len == 0
+        || (alt_len as f64 - orig_len as f64).abs() / (orig_len as f64) < 0.10;
+    let verdict = if both_ok && len_similar {
+        "BROKEN ACCESS — the altered session got the same content (likely IDOR/BOLA)"
+    } else if matches!(alt_status, 401 | 403) {
+        "denied — access control enforced (401/403)"
+    } else {
+        "different — response changed; inspect the replayed flow"
+    };
+
+    Json(json!({
+        "original": { "status": orig_status, "length": orig_len },
+        "altered":  { "status": alt_status,  "length": alt_len, "flow_id": alt.id },
+        "verdict": verdict,
+        "broken": both_ok && len_similar,
+    }))
+    .into_response()
 }
 
 // ---- Interactive intercept (§5.1) ----
