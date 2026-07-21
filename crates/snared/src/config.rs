@@ -26,6 +26,8 @@ pub struct Persisted {
     pub vars: Vec<(String, String)>,
     #[serde(default)]
     pub macros: Vec<MacroSpec>,
+    #[serde(default)]
+    pub annotations: Vec<snare_core::annotate::Annotation>,
 }
 fn yes() -> bool {
     true
@@ -106,6 +108,7 @@ impl Backend {
             ),
             "vars" => ("vars", serde_json::to_string(&persisted.vars)),
             "macros" => ("macros", serde_json::to_string(&persisted.macros)),
+            "annotations" => ("annotations", serde_json::to_string(&persisted.annotations)),
             _ => {
                 self.save(persisted);
                 return;
@@ -123,6 +126,7 @@ impl Backend {
 }
 
 /// Apply persisted settings onto the live coordinators at startup.
+#[allow(clippy::too_many_arguments)]
 pub fn apply(
     p: &Persisted,
     rules: &Rules,
@@ -130,6 +134,7 @@ pub fn apply(
     scanner: &Scanner,
     vars: &Vars,
     macros: &Macros,
+    annotations: &snare_core::annotate::Annotations,
 ) {
     if let Err(e) = rules.replace(p.rules.clone()) {
         tracing::warn!("ignoring invalid persisted rules: {e}");
@@ -138,6 +143,7 @@ pub fn apply(
     scanner.set_enabled(p.scanner_enabled);
     vars.load(p.vars.clone());
     macros.load(p.macros.clone());
+    annotations.load(p.annotations.clone());
 }
 
 /// Snapshot the current settings for writing to disk.
@@ -147,6 +153,7 @@ pub fn snapshot(
     scanner: &Scanner,
     vars: &Vars,
     macros: &Macros,
+    annotations: &snare_core::annotate::Annotations,
 ) -> Persisted {
     Persisted {
         rules: rules.list(),
@@ -154,6 +161,7 @@ pub fn snapshot(
         scanner_enabled: scanner.enabled(),
         vars: vars.list(),
         macros: macros.list(),
+        annotations: annotations.snapshot(),
     }
 }
 
@@ -218,6 +226,7 @@ mod tests {
             scanner_enabled: true,
             vars: vec![("token".into(), "secret".into())],
             macros: vec![],
+            annotations: vec![],
         }
     }
 

@@ -80,7 +80,8 @@ verified end-to-end:
 | **Passive scanner** — auto-flag missing headers, cookie flags, reflected params | ✅ |
 | **Decoder** — Base64 / URL / Hex / JWT | ✅ |
 | Three faces — TUI · Web dashboard · Desktop (Tauri) | ✅ |
-| AI-native — MCP tools (`proxy_*`, `repeater_send`, `intruder_run`) | ✅ |
+| AI-native — MCP tools (`proxy_*`, `repeater_send`, `intruder_run`, `annotate_flow`, `report_writeup`) | ✅ |
+| **Writeup curation** — Burp-style flow comments/highlights → narrated Markdown export (redacted, JSON-pretty, payload-spotlighted) | ✅ |
 | Persisted rules / scope / scanner across restart | ✅ |
 
 Still on the roadmap (see [`docs/DESIGN.md`](docs/DESIGN.md), 57 sections):

@@ -48,12 +48,17 @@ pub struct AppState {
     pub vars: Arc<snare_core::session::Vars>,
     /// Session macros.
     pub macros: Arc<snare_core::session::Macros>,
+    /// Flow annotations / writeup curation (comments, highlights, ordering).
+    pub annotations: Arc<snare_core::annotate::Annotations>,
     /// Team-mode auth (no-op in local mode).
     pub auth: Arc<crate::auth::Auth>,
     /// Cross-process events relayed from other daemons (topology B).
     pub remote_events: broadcast::Sender<FlowEvent>,
     /// Local-file or shared-Postgres configuration backend.
     pub config: crate::config::Backend,
+    /// Proxy listen address — so the dashboard "Open browser" button can wire a
+    /// launched browser to it.
+    pub proxy_addr: std::net::SocketAddr,
 }
 
 impl AppState {
@@ -65,6 +70,7 @@ impl AppState {
             &self.scanner,
             &self.vars,
             &self.macros,
+            &self.annotations,
         );
         self.config.save_kind(kind, &snap);
     }
@@ -124,6 +130,15 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/scan/active", post(active_scan_run))
         .route("/api/v1/ws", get(ws_list).post(ws_clear))
         .route("/api/v1/report", get(report))
+        .route(
+            "/api/v1/annotations",
+            get(annotations_list).post(annotations_clear),
+        )
+        .route(
+            "/api/v1/flows/:id/note",
+            post(flow_note_set).delete(flow_note_delete),
+        )
+        .route("/api/v1/browser/launch", post(browser_launch))
         .route("/api/v1/sequencer", post(sequencer_run))
         .route("/api/v1/vars", get(vars_list).put(vars_set))
         .route("/api/v1/vars/:name", axum::routing::delete(vars_delete))
@@ -944,9 +959,25 @@ async fn sequencer_run(State(st): State<AppState>, Json(b): Json<SequencerBody>)
 
 #[derive(Debug, Deserialize)]
 pub struct ReportParams {
-    /// "md" (default) or "sarif".
+    /// "md" (default), "sarif", or "writeup".
     #[serde(default)]
     pub format: Option<String>,
+    /// For `format=writeup`: comma-separated flow ids to include, in the given
+    /// order. When omitted, the *annotated* flows are used (in step order);
+    /// with no annotations, the latest captured flows (id-ascending).
+    #[serde(default)]
+    pub flows: Option<String>,
+    /// Force-include every captured flow instead of just the annotated ones.
+    #[serde(default)]
+    pub all: bool,
+    /// Redact secrets (cookies/auth) in transcripts. Default on; `redact=false`
+    /// to keep raw values.
+    #[serde(default)]
+    pub redact: Option<bool>,
+    /// Global payload to spotlight in every transcript (overrides per-flow
+    /// highlight from the annotation).
+    #[serde(default)]
+    pub highlight: Option<String>,
 }
 
 /// Generate an engagement report from the scanner findings.
@@ -996,6 +1027,47 @@ async fn report(State(st): State<AppState>, Query(p): Query<ReportParams>) -> Re
                 serde_json::to_string_pretty(&sarif).unwrap_or_default(),
             )
                 .into_response()
+        }
+        Some("writeup") => {
+            // Resolve which flow ids to transcribe, in order.
+            let ids: Vec<i64> = match p.flows.as_deref() {
+                Some(list) if !list.trim().is_empty() => list
+                    .split(',')
+                    .filter_map(|s| s.trim().parse::<i64>().ok())
+                    .collect(),
+                _ => {
+                    let annotated: Vec<i64> = st
+                        .annotations
+                        .list()
+                        .into_iter()
+                        .filter(|a| a.include)
+                        .map(|a| a.flow_id)
+                        .collect();
+                    if !annotated.is_empty() && !p.all {
+                        // Curated writeup: the annotated flows, in step order.
+                        annotated
+                    } else {
+                        // Fall back to every captured flow, chronological.
+                        let q = snare_core::store::FlowQuery::new();
+                        let mut summaries = st.store.list_flows(&q).unwrap_or_default();
+                        summaries.sort_by_key(|f| f.id);
+                        summaries.into_iter().map(|s| s.id).collect()
+                    }
+                }
+            };
+            let flows: Vec<snare_core::model::Flow> = ids
+                .iter()
+                .filter_map(|id| st.store.get_flow(*id).ok().flatten())
+                .collect();
+
+            let opts = snare_core::render::RenderOpts {
+                redact: p.redact.unwrap_or(true),
+                pretty: true,
+                max_body: 4000,
+                highlight: p.highlight.clone().filter(|h| !h.is_empty()),
+            };
+            let md = render_writeup(&st, &flows, &findings, &opts);
+            ([("content-type", "text/markdown; charset=utf-8")], md).into_response()
         }
         _ => {
             let mut counts = [0usize; 4]; // info, low, medium, high
@@ -1048,6 +1120,187 @@ async fn report(State(st): State<AppState>, Query(p): Query<ReportParams>) -> Re
             ([("content-type", "text/markdown; charset=utf-8")], md).into_response()
         }
     }
+}
+
+// ---- Embedded browser ----
+
+#[derive(Debug, Deserialize)]
+pub struct BrowserLaunch {
+    #[serde(default)]
+    pub url: Option<String>,
+}
+
+/// Launch the throwaway embedded browser wired to the proxy (the dashboard's
+/// "Open browser" button). Fire-and-forget; the browser cleans up its own
+/// profile when closed.
+async fn browser_launch(State(st): State<AppState>, Json(b): Json<BrowserLaunch>) -> Response {
+    let url = b
+        .url
+        .filter(|u| !u.trim().is_empty())
+        .unwrap_or_else(|| "about:blank".to_string());
+    let proxy = st.proxy_addr;
+    match tokio::task::spawn_blocking(move || crate::launch_browser_detached(proxy, &url)).await {
+        Ok(Ok(browser)) => Json(json!({ "ok": true, "browser": browser })).into_response(),
+        Ok(Err(e)) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "ok": false, "error": e.to_string() })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "ok": false, "error": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+// ---- Flow annotations / writeup curation ----
+
+async fn annotations_list(State(st): State<AppState>) -> Response {
+    Json(st.annotations.list()).into_response()
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AnnotationsClear {
+    #[serde(default)]
+    pub clear: bool,
+}
+
+async fn annotations_clear(
+    State(st): State<AppState>,
+    Json(b): Json<AnnotationsClear>,
+) -> Response {
+    if b.clear {
+        st.annotations.clear();
+        st.config_changed("annotations");
+    }
+    Json(json!({ "ok": true })).into_response()
+}
+
+async fn flow_note_set(
+    State(st): State<AppState>,
+    Path(id): Path<i64>,
+    Json(patch): Json<snare_core::annotate::AnnotationPatch>,
+) -> Response {
+    let result = st.annotations.update(id, patch);
+    st.config_changed("annotations");
+    Json(json!({ "ok": true, "annotation": result })).into_response()
+}
+
+async fn flow_note_delete(State(st): State<AppState>, Path(id): Path<i64>) -> Response {
+    st.annotations.remove(id);
+    st.config_changed("annotations");
+    Json(json!({ "ok": true })).into_response()
+}
+
+/// Render selected flows as a paste-ready engagement writeup. Each flow becomes
+/// a narrated section — the annotation's label as the heading and its note as
+/// prose — with request/response as smart ```http transcripts (redacted, JSON
+/// pretty-printed, payload spotlighted), followed by scanner findings correlated
+/// by host. This is the artifact an operator (or AI agent) drops straight into a
+/// report after driving an exploit through the proxy.
+fn render_writeup(
+    st: &AppState,
+    flows: &[snare_core::model::Flow],
+    findings: &[snare_core::scanner::Finding],
+    opts: &snare_core::render::RenderOpts,
+) -> String {
+    use std::collections::BTreeSet;
+
+    let mut md = String::new();
+    md.push_str("# Snare — engagement writeup\n\n");
+
+    if flows.is_empty() {
+        md.push_str("_No flows selected. Annotate the key flows (`POST /api/v1/flows/:id/note`) or pass `?format=writeup&flows=<ids>`, then re-request._\n");
+        return md;
+    }
+
+    // Summary line + which hosts are in scope of this writeup.
+    let hosts: BTreeSet<&str> = flows.iter().map(|f| f.request.host.as_str()).collect();
+    md.push_str(&format!(
+        "- Flows included: **{}**\n- Hosts: {}\n",
+        flows.len(),
+        hosts
+            .iter()
+            .map(|h| format!("`{h}`"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    ));
+    if opts.redact {
+        md.push_str("- _Secrets in headers are redacted; pass `redact=false` for raw values._\n");
+    }
+    md.push('\n');
+
+    md.push_str("## HTTP transcript\n\n");
+    for (i, flow) in flows.iter().enumerate() {
+        let req = &flow.request;
+        let ann = st.annotations.get(flow.id);
+
+        // Heading: the annotation label tells the story; fall back to the verb+URL.
+        let step = i + 1;
+        match ann.as_ref().and_then(|a| a.label.as_deref()) {
+            Some(label) => md.push_str(&format!("### Step {step}: {label}\n\n")),
+            None => md.push_str(&format!("### Step {step}: `{} {}`\n\n", req.method, req.url())),
+        }
+        // Prose note explaining why this flow matters.
+        if let Some(note) = ann.as_ref().and_then(|a| a.note.as_deref()) {
+            md.push_str(note);
+            md.push_str("\n\n");
+        }
+
+        md.push_str(&format!("`{} {}`\n\n", req.method, req.url()));
+        if let Some(status) = flow.response.as_ref().map(|r| r.status) {
+            md.push_str(&format!("_source: {} · status: {}", flow.source.as_str(), status));
+            if let Some(ms) = flow.duration_ms {
+                md.push_str(&format!(" · {ms} ms"));
+            }
+            md.push_str(&format!(" · flow #{}_\n\n", flow.id));
+        }
+
+        // Per-flow render opts: global highlight wins, else the annotation's.
+        let flow_opts = snare_core::render::RenderOpts {
+            highlight: opts
+                .highlight
+                .clone()
+                .or_else(|| ann.as_ref().and_then(|a| a.highlight.clone())),
+            ..opts.clone()
+        };
+
+        md.push_str("**Request**\n\n```http\n");
+        md.push_str(req.to_raw_opts(&flow_opts).trim_end());
+        md.push_str("\n```\n\n");
+
+        if let Some(resp) = &flow.response {
+            md.push_str("**Response**\n\n```http\n");
+            md.push_str(resp.to_raw_opts(&flow_opts).trim_end());
+            md.push_str("\n```\n\n");
+        } else {
+            md.push_str("_No response captured._\n\n");
+        }
+    }
+
+    // Correlate findings to the hosts featured in this writeup.
+    let relevant: Vec<&snare_core::scanner::Finding> = findings
+        .iter()
+        .filter(|f| hosts.contains(f.host.as_str()))
+        .collect();
+    if !relevant.is_empty() {
+        md.push_str("## Correlated findings\n\n");
+        md.push_str("| Severity | Title | Host | Detail |\n|---|---|---|---|\n");
+        for f in relevant {
+            let sev = match f.severity {
+                snare_core::scanner::Severity::High => "HIGH",
+                snare_core::scanner::Severity::Medium => "MEDIUM",
+                snare_core::scanner::Severity::Low => "LOW",
+                snare_core::scanner::Severity::Info => "INFO",
+            };
+            let detail = f.detail.replace('|', "\\|").replace('\n', " ");
+            md.push_str(&format!("| {sev} | {} | {} | {} |\n", f.title, f.host, detail));
+        }
+        md.push('\n');
+    }
+
+    md
 }
 
 // ---- WebSocket capture ----

@@ -269,6 +269,42 @@
   #intercept textarea{width:100%;max-width:1000px;height:56vh;background:#0a0e14;color:#e6edf3;
     border:1px solid var(--err);border-radius:0 0 10px 10px;padding:14px;font-family:var(--mono);
     font-size:13px;line-height:1.55;resize:none;outline:none}
+  /* ---- Annotations (Burp-style comments/highlights) + Writeup ---- */
+  td.col-note{max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--accent);font-size:11px}
+  tr[data-color]{box-shadow:inset 3px 0 0 var(--nc)}
+  tr[data-color="red"]{--nc:#f85149} tr[data-color="orange"]{--nc:#f0883e} tr[data-color="yellow"]{--nc:#d9b02b}
+  tr[data-color="green"]{--nc:#3fb950} tr[data-color="cyan"]{--nc:#39c5cf} tr[data-color="blue"]{--nc:#58a6ff}
+  tr[data-color="pink"]{--nc:#db61a2} tr[data-color="magenta"]{--nc:#bc8cff}
+  .detail-head #btnNote{background:var(--panel2);color:var(--accent)}
+  .detail-head #btnNote.on{background:var(--accent);color:#000}
+  #note{position:fixed;inset:0;background:rgba(2,4,8,.72);display:none;align-items:center;justify-content:center;z-index:24}
+  #note.show{display:flex}
+  #note .nbox{width:min(560px,92vw);background:var(--panel);border:1px solid var(--line);border-radius:10px;display:flex;flex-direction:column;overflow:hidden}
+  #note .rhead{display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--line);font-weight:700}
+  #note .rhead .grow{flex:1} #note .rhead span.x{cursor:pointer;color:var(--dim)}
+  #note .nbody{padding:12px 14px;display:flex;flex-direction:column;gap:9px}
+  #note label{font-size:11px;color:var(--dim);display:flex;flex-direction:column;gap:3px}
+  #note input,#note textarea{background:var(--panel2);border:1px solid var(--line);color:var(--fg);
+    padding:6px 9px;border-radius:6px;font-family:var(--mono);font-size:12px;outline:none}
+  #note textarea{resize:vertical;min-height:52px}
+  #note .nrow{display:flex;gap:9px} #note .nrow label{flex:1}
+  #note .swatches{display:flex;gap:6px;padding-top:2px}
+  #note .sw{width:20px;height:20px;border-radius:5px;cursor:pointer;border:2px solid transparent}
+  #note .sw.sel{border-color:#fff}
+  #note .nfoot{display:flex;gap:8px;padding:10px 14px;border-top:1px solid var(--line)}
+  #note .nfoot .grow{flex:1}
+  #note .nfoot button{border:0;padding:6px 16px;border-radius:6px;cursor:pointer;font-weight:700}
+  #note #nsave{background:var(--accent);color:#000} #note #ndel{background:var(--panel2);color:var(--err)}
+  #writeup{position:fixed;inset:0;background:rgba(2,4,8,.72);display:none;align-items:center;justify-content:center;z-index:24}
+  #writeup.show{display:flex}
+  #writeup .wbox{width:min(920px,95vw);max-height:88vh;background:var(--panel);border:1px solid var(--line);border-radius:10px;display:flex;flex-direction:column;overflow:hidden}
+  #writeup .rhead{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--line);font-weight:700}
+  #writeup .rhead .grow{flex:1} #writeup .rhead span.x{cursor:pointer;color:var(--dim)}
+  #writeup .wtools{display:flex;align-items:center;gap:10px;padding:8px 14px;border-bottom:1px solid var(--line);font-size:12px;color:var(--dim)}
+  #writeup .wtools input{width:200px;background:var(--panel2);border:1px solid var(--line);color:var(--fg);padding:5px 8px;border-radius:6px;font-family:var(--mono);font-size:12px}
+  #writeup .wtools button{background:var(--accent);color:#000;border:0;padding:5px 12px;border-radius:6px;cursor:pointer;font-weight:700}
+  #writeup .wtools label{display:flex;align-items:center;gap:5px;cursor:pointer}
+  #writeup pre{margin:0;overflow:auto;padding:14px;font-family:var(--mono);font-size:12px;line-height:1.55;color:#c9d1d9;white-space:pre-wrap;word-break:break-word}
 </style>
 </head>
 <body>
@@ -291,6 +327,8 @@
   <button id="btnCompare" title="Compare two requests/responses">⚖ Compare</button>
   <button id="btnSeq" title="Sequencer — token randomness">🎲 Seq</button>
   <button id="btnDecoder" title="Encode / decode">🔧 Decoder</button>
+  <button id="btnWriteup" title="Curate annotated flows into a paste-ready writeup">📝 Writeup</button>
+  <button id="btnBrowser" title="Open a throwaway browser wired to the proxy">🌐 Browser</button>
   <button id="btnNotify" title="Desktop popups when the AI acts">🔔 Popups: off</button>
   <button id="btnAuto" class="active" title="Auto-scroll to newest">⤓ Auto</button>
   <button id="btnClear" title="Clear the view (does not delete stored flows)">Clear</button>
@@ -308,6 +346,7 @@
       <table>
         <thead><tr>
           <th class="col-num">#</th><th>M</th><th>St</th><th>Host / Path</th>
+          <th title="writeup comment">💬</th>
           <th>Type</th><th class="col-sz">Size</th><th class="col-ms">ms</th><th class="col-time">Time</th>
         </tr></thead>
         <tbody id="rows"></tbody>
@@ -417,6 +456,49 @@
   </div>
 </div>
 
+<div id="note">
+  <div class="nbox">
+    <div class="rhead">📝 Annotate flow <span id="nFlow" style="color:var(--accent)"></span><span class="grow"></span><span class="x" id="noteClose">✕</span></div>
+    <div class="nbody">
+      <label>Label (writeup section heading)
+        <input type="text" id="nlabel" placeholder="e.g. Sandbox escape" spellcheck="false"></label>
+      <label>Note (why this step matters)
+        <textarea id="nnote" placeholder="prose shown above the transcript"></textarea></label>
+      <div class="nrow">
+        <label>Step (order)<input type="number" id="nstep" min="1" placeholder="1"></label>
+        <label>Highlight payload<input type="text" id="nhl" placeholder="substring to spotlight" spellcheck="false"></label>
+      </div>
+      <label>Highlight colour
+        <div class="swatches" id="nswatches">
+          <div class="sw" data-c="" style="background:#30363d" title="none"></div>
+          <div class="sw" data-c="red" style="background:#f85149"></div>
+          <div class="sw" data-c="orange" style="background:#f0883e"></div>
+          <div class="sw" data-c="yellow" style="background:#d9b02b"></div>
+          <div class="sw" data-c="green" style="background:#3fb950"></div>
+          <div class="sw" data-c="cyan" style="background:#39c5cf"></div>
+          <div class="sw" data-c="blue" style="background:#58a6ff"></div>
+          <div class="sw" data-c="pink" style="background:#db61a2"></div>
+        </div></label>
+      <label style="flex-direction:row;align-items:center;gap:7px"><input type="checkbox" id="ninclude" checked style="width:auto"> include in writeup</label>
+    </div>
+    <div class="nfoot"><button id="ndel">Remove</button><span class="grow"></span><button id="nsave">Save</button></div>
+  </div>
+</div>
+
+<div id="writeup">
+  <div class="wbox">
+    <div class="rhead">📝 Engagement writeup <span class="grow"></span><span class="x" id="wuClose">✕</span></div>
+    <div class="wtools">
+      <span>highlight:</span><input type="text" id="wuHl" placeholder="global payload (optional)" spellcheck="false">
+      <label><input type="checkbox" id="wuRedact" checked> redact secrets</label>
+      <button id="wuRefresh">↻ Refresh</button>
+      <span class="grow"></span>
+      <button id="wuCopy">⧉ Copy Markdown</button>
+    </div>
+    <pre id="wuBody">annotate flows (📝 in the detail pane), then open this panel…</pre>
+  </div>
+</div>
+
 <div id="findings">
   <div class="fbox">
     <div class="rhead">⚠ Passive scan findings <span class="grow"></span>
@@ -502,7 +584,8 @@
   };
 
   const state = { flows: new Map(), order: [], sel: null, detail: null, tab: 'req',
-                  auto: true, notify: false, query: [], intercept: false, interceptResp: false, held: [], findings: [], ws: [] };
+                  auto: true, notify: false, query: [], intercept: false, interceptResp: false, held: [], findings: [], ws: [],
+                  annotations: new Map() };
 
   // ---------- helpers ----------
   const esc = s => (s==null?'':String(s)).replace(/[&<>"']/g, c => ({
@@ -551,14 +634,22 @@
     const sc = f.status ? 's'+String(f.status)[0] : 's0';
     const type = (f.mime||'').replace('application/','').replace('text/','');
     const rep = f.source==='repeater' ? '<span class="rep" title="repeater">↻</span>' : '';
+    const ann = state.annotations.get(f.id);
+    const comment = ann && ann.label ? esc(ann.label) : (ann && ann.note ? esc(ann.note) : '');
     return `<td class="col-num">${rep}${f.id}</td>`+
       `<td class="m m-${esc(f.method)}">${esc(f.method)}</td>`+
       `<td class="${sc}">${f.status||'·'}</td>`+
       `<td><span class="host">${esc(f.host)}</span><span class="url">${esc(f.path)}</span></td>`+
+      `<td class="col-note" title="${comment}">${comment}</td>`+
       `<td class="host">${esc(type)}</td>`+
       `<td class="col-sz">${sizeFmt(f.resp_size)}</td>`+
       `<td class="col-ms">${f.duration_ms??''}</td>`+
       `<td class="col-time">${hhmmss(f.ts)}</td>`;
+  }
+
+  function applyRowColor(tr, id){
+    const ann = state.annotations.get(id);
+    if(ann && ann.color) tr.dataset.color = ann.color; else tr.removeAttribute('data-color');
   }
 
   function upsert(f, fresh){
@@ -571,6 +662,7 @@
       if(state.auto) rows.prepend(tr); else rows.appendChild(tr);
     }
     tr.innerHTML = rowHtml(f);
+    applyRowColor(tr, f.id);
     tr.style.display = matches(f) ? '' : 'none';
     if(state.sel === f.id) tr.classList.add('sel');
     if(fresh){ tr.classList.remove('fresh'); void tr.offsetWidth; tr.classList.add('fresh'); }
@@ -592,12 +684,15 @@
         `<button id="editrep" title="Edit &amp; send (Repeater)">✎ Edit</button>`+
         `<button id="tointruder" title="Send to Intruder (fuzz)">⚔ Intruder</button>`+
         `<button id="activescan" title="Active scan query params (XSS/SQLi)">🛡 Scan</button>`+
+        `<button id="btnNote" title="Annotate for the writeup (comment / highlight)">📝 Note</button>`+
         `<span class="m m-${esc(f.request.method)}">${esc(f.request.method)}</span> `+
         `<span class="url">${esc(url)}</span>`;
       $('resend').onclick = () => resend(id);
       $('editrep').onclick = () => openRepeater();
       $('tointruder').onclick = () => openIntruder();
       $('activescan').onclick = () => activeScan(id);
+      const nb=$('btnNote'); if(state.annotations.has(id)) nb.classList.add('on');
+      nb.onclick = () => openNote(id);
       renderDetail();
     }catch(e){ $('dHead').innerHTML='<span class="s5">failed to load</span>'; }
   }
@@ -647,6 +742,73 @@
       $('dBody').innerHTML = (rs.body_truncated ? '<span class="s4">[body capture truncated; wire traffic was complete]</span>\n' : '')+
         esc(line)+'\n'+headerBlock(rs.headers)+'\n\n'+esc(b64dec(rs.body));
     }
+  }
+
+  // ---------- Annotations (writeup curation) ----------
+  async function loadAnnotations(){
+    try{
+      const list = await (await fetch('/api/v1/annotations')).json();
+      state.annotations = new Map(list.map(a => [a.flow_id, a]));
+    }catch(e){ return; }
+    // re-render comment + colour on every visible row
+    state.flows.forEach(({f, el}, id) => { el.innerHTML = rowHtml(f); applyRowColor(el, id); if(state.sel===id) el.classList.add('sel'); });
+  }
+
+  let noteId = null, noteColor = '';
+  function openNote(id){
+    noteId = id;
+    const a = state.annotations.get(id) || {};
+    $('nFlow').textContent = '#'+id;
+    $('nlabel').value = a.label || '';
+    $('nnote').value  = a.note  || '';
+    $('nstep').value  = a.step!=null ? a.step : '';
+    $('nhl').value    = a.highlight || '';
+    $('ninclude').checked = a.include!==false;
+    noteColor = a.color || '';
+    document.querySelectorAll('#nswatches .sw').forEach(s => s.classList.toggle('sel', (s.dataset.c||'')===noteColor));
+    $('note').classList.add('show');
+    $('nlabel').focus();
+  }
+  async function saveNote(){
+    if(noteId==null) return;
+    const patch = {
+      label: $('nlabel').value,
+      note:  $('nnote').value,
+      highlight: $('nhl').value,
+      color: noteColor,
+      include: $('ninclude').checked,
+    };
+    const st = $('nstep').value.trim();
+    if(st!=='') patch.step = parseInt(st, 10);
+    await fetch('/api/v1/flows/'+noteId+'/note', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(patch)});
+    $('note').classList.remove('show');
+    // SSE config_changed will refresh, but update eagerly for snappiness
+    await loadAnnotations();
+    if(state.sel===noteId){ const nb=$('btnNote'); if(nb) nb.classList.toggle('on', state.annotations.has(noteId)); }
+  }
+  async function removeNote(){
+    if(noteId==null) return;
+    await fetch('/api/v1/flows/'+noteId+'/note', {method:'DELETE'});
+    $('note').classList.remove('show');
+    await loadAnnotations();
+    if(state.sel===noteId){ const nb=$('btnNote'); if(nb) nb.classList.remove('on'); }
+  }
+
+  // ---------- Writeup panel ----------
+  async function loadWriteup(){
+    const q = new URLSearchParams({ format:'writeup' });
+    const hl = $('wuHl').value.trim(); if(hl) q.set('highlight', hl);
+    if(!$('wuRedact').checked) q.set('redact', 'false');
+    $('wuBody').textContent = 'rendering…';
+    try{
+      const md = await (await fetch('/api/v1/report?'+q.toString())).text();
+      $('wuBody').textContent = md;
+    }catch(e){ $('wuBody').textContent = 'error: '+e.message; }
+  }
+  async function copyWriteup(){
+    try{ await navigator.clipboard.writeText($('wuBody').textContent);
+      const b=$('wuCopy'); const t=b.textContent; b.textContent='✓ Copied'; setTimeout(()=>b.textContent=t,1200);
+    }catch(e){}
   }
 
   // ---------- AI activity ----------
@@ -1044,6 +1206,10 @@
     // Reload a panel only if it's currently open (another operator changed it).
     if(kind==='rules' && $('rules').classList.contains('show')) loadRules();
     if((kind==='vars'||kind==='macros') && $('session').classList.contains('show')) loadSession();
+    if(kind==='annotations'){
+      loadAnnotations();
+      if($('writeup').classList.contains('show')) loadWriteup();
+    }
     if(kind==='scope'){
       fetch('/api/v1/intercept').then(r=>r.json()).then(s=>{ $('scope').value=(s.scope||[]).join(', '); }).catch(()=>{});
     }
@@ -1103,6 +1269,7 @@
     }catch(e){}
     loadFindings();
     loadWs();
+    loadAnnotations();
   }
 
   // ---------- controls ----------
@@ -1159,6 +1326,33 @@
   $('btnDecoder').onclick = () => $('decoder').classList.add('show');
   $('decClose').onclick = () => $('decoder').classList.remove('show');
   document.querySelectorAll('#decoder .dbtns button').forEach(b => b.onclick = () => runDecoder(b.dataset.op));
+  // Note editor
+  $('noteClose').onclick = () => $('note').classList.remove('show');
+  $('nsave').onclick = saveNote;
+  $('ndel').onclick = removeNote;
+  $('nlabel').addEventListener('keydown', e => { if((e.ctrlKey||e.metaKey)&&e.key==='Enter'){ e.preventDefault(); saveNote(); }});
+  document.querySelectorAll('#nswatches .sw').forEach(sw => sw.onclick = () => {
+    noteColor = sw.dataset.c || '';
+    document.querySelectorAll('#nswatches .sw').forEach(s => s.classList.toggle('sel', s===sw));
+  });
+  // Open embedded browser
+  $('btnBrowser').onclick = async () => {
+    const b = $('btnBrowser'); const t = b.textContent;
+    b.disabled = true; b.textContent = '🌐 opening…';
+    try{
+      const r = await fetch('/api/v1/browser/launch', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({})});
+      const d = await r.json();
+      b.textContent = d.ok ? ('🌐 '+d.browser) : '🌐 failed';
+    }catch(e){ b.textContent = '🌐 failed'; }
+    setTimeout(()=>{ b.textContent = t; b.disabled = false; }, 1600);
+  };
+  // Writeup panel
+  $('btnWriteup').onclick = () => { $('writeup').classList.add('show'); loadWriteup(); };
+  $('wuClose').onclick = () => $('writeup').classList.remove('show');
+  $('wuRefresh').onclick = loadWriteup;
+  $('wuRedact').onclick = loadWriteup;
+  $('wuHl').addEventListener('keydown', e => { if(e.key==='Enter') loadWriteup(); });
+  $('wuCopy').onclick = copyWriteup;
   $('btnFindings').onclick = () => $('findings').classList.add('show');
   $('findClose').onclick = () => $('findings').classList.remove('show');
   $('findClear').onclick = async () => { await fetch('/api/v1/findings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({clear:true})}); loadFindings(); };

@@ -98,6 +98,16 @@ impl ApiClient {
         .json()?)
     }
 
+    /// GET a text/plain-ish endpoint (e.g. the markdown report) as a String.
+    fn get_text(&self, path: &str, query: &[(&str, String)]) -> Result<String> {
+        Ok(Self::checked(
+            self.request(reqwest::Method::GET, path)
+                .query(query)
+                .send()?,
+        )?
+        .text()?)
+    }
+
     fn notify_activity(&self, tool: &str, detail: &str) {
         let agent = std::env::var("SNARE_AGENT").unwrap_or_else(|_| "ai-agent".into());
         let body = json!({
@@ -239,6 +249,39 @@ fn tool_specs() -> Value {
                 "properties": { "from_flow": { "type": "integer", "description": "flow id to scan" } },
                 "required": ["from_flow"]
             }
+        },
+        {
+            "name": "annotate_flow",
+            "description": "Curate a captured flow for the writeup (Burp-style comment/highlight). Set a `label` (section heading, e.g. \"Sandbox escape\"), a `note` (prose explaining why it matters), a `step` (ordering), a `highlight` (the payload substring to spotlight in the transcript), and/or a `color`. Annotated flows become the default writeup, narrated and in step order.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "flow_id": { "type": "integer", "description": "flow id to annotate" },
+                    "label": { "type": "string", "description": "short section heading" },
+                    "note": { "type": "string", "description": "prose explaining the step" },
+                    "step": { "type": "integer", "description": "ordering position (lower = earlier)" },
+                    "highlight": { "type": "string", "description": "payload substring to spotlight" },
+                    "color": { "type": "string", "description": "row highlight colour (red/orange/yellow/green/cyan/blue/pink)" },
+                    "include": { "type": "boolean", "description": "include in writeup (default true)" }
+                },
+                "required": ["flow_id"]
+            }
+        },
+        {
+            "name": "report_writeup",
+            "description": "Render the writeup as paste-ready Markdown: each flow narrated (annotation label as heading, note as prose) with smart ```http transcripts — secrets redacted, JSON pretty-printed, the payload spotlighted — plus scanner findings correlated by host. Omit `flows` to use the annotated flows in step order (annotate them first with `annotate_flow`); pass `flows` to force a specific set/order. `highlight` spotlights a payload across every flow; `redact=false` keeps raw secrets.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "flows": {
+                        "type": "array",
+                        "items": { "type": "integer" },
+                        "description": "flow ids to include, in order (overrides annotation curation)"
+                    },
+                    "highlight": { "type": "string", "description": "payload to spotlight in every transcript" },
+                    "redact": { "type": "boolean", "description": "redact secrets in headers (default true)" }
+                }
+            }
         }
     ])
 }
@@ -318,6 +361,25 @@ fn summarize_call(name: &str, args: &Value) -> String {
         "active_scan" => {
             let id = args.get("from_flow").and_then(|i| i.as_i64()).unwrap_or(-1);
             format!("active-scan flow #{id} (XSS/SQLi)")
+        }
+        "annotate_flow" => {
+            let id = args.get("flow_id").and_then(|i| i.as_i64()).unwrap_or(-1);
+            match args.get("label").and_then(|v| v.as_str()) {
+                Some(label) => format!("annotate flow #{id}: \"{label}\""),
+                None => format!("annotate flow #{id}"),
+            }
+        }
+        "report_writeup" => {
+            let n = args
+                .get("flows")
+                .and_then(|f| f.as_array())
+                .map(|a| a.len())
+                .unwrap_or(0);
+            if n > 0 {
+                format!("export writeup of {n} selected flow(s)")
+            } else {
+                "export writeup of annotated flows".into()
+            }
         }
         other => format!("call {other}"),
     }
@@ -415,6 +477,54 @@ fn tools_call(params: Option<&Value>, api: &ApiClient) -> Result<Value> {
             let body = json!({ "from_flow": from_flow });
             let out: Value = api.post("/api/v1/scan/active", &body)?;
             Ok(text_result(serde_json::to_string_pretty(&out)?))
+        }
+        "annotate_flow" => {
+            let flow_id = args
+                .get("flow_id")
+                .and_then(|i| i.as_i64())
+                .ok_or_else(|| anyhow::anyhow!("missing `flow_id`"))?;
+            // Forward only the provided annotation fields as a patch.
+            let mut patch = serde_json::Map::new();
+            for key in ["label", "note", "highlight", "color"] {
+                if let Some(v) = args.get(key).and_then(|v| v.as_str()) {
+                    patch.insert(key.into(), json!(v));
+                }
+            }
+            if let Some(v) = args.get("step").and_then(|v| v.as_i64()) {
+                patch.insert("step".into(), json!(v));
+            }
+            if let Some(v) = args.get("include").and_then(|v| v.as_bool()) {
+                patch.insert("include".into(), json!(v));
+            }
+            let out: Value = api.post(
+                &format!("/api/v1/flows/{flow_id}/note"),
+                &Value::Object(patch),
+            )?;
+            Ok(text_result(serde_json::to_string_pretty(&out)?))
+        }
+        "report_writeup" => {
+            let mut query = vec![("format", "writeup".to_string())];
+            if let Some(ids) = args.get("flows").and_then(|f| f.as_array()) {
+                let list = ids
+                    .iter()
+                    .filter_map(|v| v.as_i64())
+                    .map(|n| n.to_string())
+                    .collect::<Vec<_>>()
+                    .join(",");
+                if !list.is_empty() {
+                    query.push(("flows", list));
+                }
+            }
+            if let Some(h) = args.get("highlight").and_then(|v| v.as_str()) {
+                if !h.is_empty() {
+                    query.push(("highlight", h.to_string()));
+                }
+            }
+            if let Some(false) = args.get("redact").and_then(|v| v.as_bool()) {
+                query.push(("redact", "false".to_string()));
+            }
+            let md = api.get_text("/api/v1/report", &query)?;
+            Ok(text_result(md))
         }
         other => anyhow::bail!("unknown tool: {other}"),
     }

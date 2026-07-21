@@ -208,8 +208,9 @@ async fn cmd_run(
     let wslog = Arc::new(snare_core::ws::WsLog::new());
     let vars = Arc::new(snare_core::session::Vars::new());
     let session_macros = Arc::new(snare_core::session::Macros::new());
+    let annotations = Arc::new(snare_core::annotate::Annotations::new());
 
-    // Restore persisted state (rules / scope / scanner / vars / macros).
+    // Restore persisted state (rules / scope / scanner / vars / macros / notes).
     if let Some(persisted) = config_backend.load() {
         config::apply(
             &persisted,
@@ -218,6 +219,7 @@ async fn cmd_run(
             &scanner,
             &vars,
             &session_macros,
+            &annotations,
         );
         tracing::info!("restored {} persisted rule(s)", persisted.rules.len());
     }
@@ -233,6 +235,7 @@ async fn cmd_run(
         let shared_scanner = scanner.clone();
         let shared_vars = vars.clone();
         let shared_macros = session_macros.clone();
+        let shared_annotations = annotations.clone();
         let shared_wslog = wslog.clone();
         tokio::spawn(async move {
             while let Ok(event) = remote_rx.recv().await {
@@ -246,6 +249,7 @@ async fn cmd_run(
                                 &shared_scanner,
                                 &shared_vars,
                                 &shared_macros,
+                                &shared_annotations,
                             );
                         }
                     }
@@ -275,9 +279,11 @@ async fn cmd_run(
         wslog: wslog.clone(),
         vars: vars.clone(),
         macros: session_macros.clone(),
+        annotations: annotations.clone(),
         auth: Arc::new(auth::Auth::new(auth_token)),
         remote_events: remote_events.clone(),
         config: config_backend,
+        proxy_addr,
     });
     let listener = tokio::net::TcpListener::bind(api_addr)
         .await
@@ -338,20 +344,19 @@ async fn cmd_run(
     Ok(())
 }
 
-/// Launch a Chromium-family browser pre-wired to the proxy, in a throwaway
-/// profile, ignoring cert errors (so the MITM'd HTTPS just works) — the
-/// convenience "embedded browser" you point at your target.
-fn cmd_browser(proxy: SocketAddr, url: &str) -> Result<()> {
-    #[cfg(target_os = "windows")]
-    const CANDIDATES: &[&str] = &["chrome.exe", "msedge.exe", "brave.exe", "chromium.exe"];
-    #[cfg(not(target_os = "windows"))]
-    const CANDIDATES: &[&str] = &[
-        "chromium",
-        "chromium-browser",
-        "google-chrome",
-        "google-chrome-stable",
-        "brave-browser",
-    ];
+#[cfg(target_os = "windows")]
+const BROWSER_CANDIDATES: &[&str] = &["chrome.exe", "msedge.exe", "brave.exe", "chromium.exe"];
+#[cfg(not(target_os = "windows"))]
+const BROWSER_CANDIDATES: &[&str] = &[
+    "chromium",
+    "chromium-browser",
+    "google-chrome",
+    "google-chrome-stable",
+    "brave-browser",
+];
+
+/// Create a fresh throwaway browser profile directory (0700).
+fn make_browser_profile() -> Result<std::path::PathBuf> {
     let mut random = [0u8; 8];
     getrandom::getrandom(&mut random)
         .map_err(|e| anyhow::anyhow!("create private browser profile name: {e}"))?;
@@ -361,6 +366,68 @@ fn cmd_browser(proxy: SocketAddr, url: &str) -> Result<()> {
         std::process::id()
     ));
     paths::secure_dir(&profile).context("create throwaway browser profile")?;
+    Ok(profile)
+}
+
+/// Chromium flags that wire the browser to the proxy, accept the MITM cert, and
+/// silence Chromium's phone-home traffic so the only flows captured are the ones
+/// *you* generate — not component updates, Safe Browsing, sync, or NTP pings.
+fn browser_flags(proxy: SocketAddr, profile: &std::path::Path, url: &str) -> Vec<String> {
+    vec![
+        format!("--proxy-server=http://{proxy}"),
+        "--proxy-bypass-list=<-loopback>".into(),
+        "--ignore-certificate-errors".into(),
+        "--disable-background-mode".into(),
+        format!("--user-data-dir={}", profile.display()),
+        "--no-first-run".into(),
+        "--no-default-browser-check".into(),
+        "--disable-background-networking".into(),
+        "--disable-component-update".into(),
+        "--disable-sync".into(),
+        "--disable-domain-reliability".into(),
+        "--disable-client-side-phishing-detection".into(),
+        "--disable-breakpad".into(),
+        "--disable-default-apps".into(),
+        "--no-pings".into(),
+        "--metrics-recording-only".into(),
+        "--disable-features=OptimizationHints,Translate,MediaRouter,InterestFeedContentSuggestions,ChromeWhatsNewUI".into(),
+        url.to_string(),
+    ]
+}
+
+/// Spawn the throwaway browser fire-and-forget and reap its temp profile when it
+/// exits. Returns the browser binary that launched. Used by the dashboard's
+/// "Open browser" button so the operator never touches the CLI.
+pub(crate) fn launch_browser_detached(proxy: SocketAddr, url: &str) -> Result<String> {
+    let profile = make_browser_profile()?;
+    let flags = browser_flags(proxy, &profile, url);
+    let mut failures = Vec::new();
+    for browser in BROWSER_CANDIDATES {
+        match std::process::Command::new(browser).args(&flags).spawn() {
+            Ok(mut child) => {
+                let prof = profile.clone();
+                std::thread::spawn(move || {
+                    let _ = child.wait();
+                    let _ = std::fs::remove_dir_all(&prof);
+                });
+                return Ok((*browser).to_string());
+            }
+            Err(e) => failures.push(format!("{browser}: {e}")),
+        }
+    }
+    let _ = std::fs::remove_dir_all(&profile);
+    bail!(
+        "no Chromium-family browser could be launched (tried {}). Details: {}",
+        BROWSER_CANDIDATES.join(", "),
+        failures.join("; ")
+    )
+}
+
+/// Launch a Chromium-family browser pre-wired to the proxy, in a throwaway
+/// profile — the CLI "embedded browser". Blocks until the browser closes, then
+/// removes the profile.
+fn cmd_browser(proxy: SocketAddr, url: &str) -> Result<()> {
+    let profile = make_browser_profile()?;
     struct ProfileGuard(std::path::PathBuf);
     impl Drop for ProfileGuard {
         fn drop(&mut self) {
@@ -373,20 +440,11 @@ fn cmd_browser(proxy: SocketAddr, url: &str) -> Result<()> {
         }
     }
     let _profile_guard = ProfileGuard(profile.clone());
+    let flags = browser_flags(proxy, &profile, url);
 
     let mut failures = Vec::new();
-    for browser in CANDIDATES {
-        let child = std::process::Command::new(browser)
-            .arg(format!("--proxy-server=http://{proxy}"))
-            .arg("--proxy-bypass-list=<-loopback>")
-            .arg("--ignore-certificate-errors")
-            .arg("--disable-background-mode")
-            .arg(format!("--user-data-dir={}", profile.display()))
-            .arg("--no-first-run")
-            .arg("--no-default-browser-check")
-            .arg(url)
-            .spawn();
-        match child {
+    for browser in BROWSER_CANDIDATES {
+        match std::process::Command::new(browser).args(&flags).spawn() {
             Ok(mut child) => {
                 println!("Launching {browser} → proxy {proxy}");
                 println!("  temporary profile: {}", profile.display());
@@ -404,7 +462,7 @@ fn cmd_browser(proxy: SocketAddr, url: &str) -> Result<()> {
     }
     bail!(
         "no Chromium-family browser could be launched (tried {}). Details: {}",
-        CANDIDATES.join(", "),
+        BROWSER_CANDIDATES.join(", "),
         failures.join("; ")
     )
 }

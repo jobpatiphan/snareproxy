@@ -74,6 +74,28 @@ impl HttpRequest {
             .find(|(k, _)| k.eq_ignore_ascii_case(name))
             .map(|(_, v)| v.as_str())
     }
+
+    /// Reconstruct the request as an HTTP wire-format transcript
+    /// (`\n`-terminated for readability). Body is decoded lossily as UTF-8;
+    /// this is meant for human display / writeups, not byte-exact replay.
+    pub fn to_raw(&self) -> String {
+        let target = match &self.query {
+            Some(q) if !q.is_empty() => format!("{}?{}", self.path, q),
+            _ => self.path.clone(),
+        };
+        let mut out = format!("{} {} {}\n", self.method, target, self.http_version);
+        for (k, v) in &self.headers {
+            out.push_str(&format!("{k}: {v}\n"));
+        }
+        out.push('\n');
+        if !self.body.is_empty() {
+            out.push_str(&String::from_utf8_lossy(&self.body));
+        }
+        if self.body_truncated {
+            out.push_str("\n… [body truncated by capture limit]");
+        }
+        out
+    }
 }
 
 /// A captured HTTP response.
@@ -101,6 +123,59 @@ impl HttpResponse {
         self.header("content-type")
             .map(|ct| ct.split(';').next().unwrap_or(ct).trim())
     }
+
+    /// Reconstruct the response as an HTTP wire-format transcript
+    /// (`\n`-terminated for readability). Body is decoded lossily as UTF-8;
+    /// this is meant for human display / writeups, not byte-exact replay.
+    pub fn to_raw(&self) -> String {
+        let mut out = format!(
+            "{} {}{}\n",
+            self.http_version,
+            self.status,
+            reason_phrase(self.status)
+                .map(|r| format!(" {r}"))
+                .unwrap_or_default()
+        );
+        for (k, v) in &self.headers {
+            out.push_str(&format!("{k}: {v}\n"));
+        }
+        out.push('\n');
+        if !self.body.is_empty() {
+            out.push_str(&String::from_utf8_lossy(&self.body));
+        }
+        if self.body_truncated {
+            out.push_str("\n… [body truncated by capture limit]");
+        }
+        out
+    }
+}
+
+/// Canonical reason phrase for common status codes (best-effort; the wire
+/// phrase is not retained, so this is reconstructed for readability only).
+pub(crate) fn reason_phrase(status: u16) -> Option<&'static str> {
+    Some(match status {
+        200 => "OK",
+        201 => "Created",
+        204 => "No Content",
+        301 => "Moved Permanently",
+        302 => "Found",
+        303 => "See Other",
+        304 => "Not Modified",
+        307 => "Temporary Redirect",
+        308 => "Permanent Redirect",
+        400 => "Bad Request",
+        401 => "Unauthorized",
+        403 => "Forbidden",
+        404 => "Not Found",
+        405 => "Method Not Allowed",
+        409 => "Conflict",
+        422 => "Unprocessable Entity",
+        429 => "Too Many Requests",
+        500 => "Internal Server Error",
+        502 => "Bad Gateway",
+        503 => "Service Unavailable",
+        _ => return None,
+    })
 }
 
 /// A full request/response pair as stored.
@@ -325,5 +400,61 @@ mod tests {
         assert!(b64::decode("====").is_err());
         assert!(b64::decode("AA=A").is_err());
         assert_eq!(b64::decode("aGVsbG8=").unwrap(), b"hello");
+    }
+
+    #[test]
+    fn request_to_raw_includes_query_headers_and_body() {
+        let request = HttpRequest {
+            method: "POST".into(),
+            scheme: "https".into(),
+            host: "example.test".into(),
+            port: 443,
+            path: "/login".into(),
+            query: Some("next=/admin".into()),
+            http_version: "HTTP/1.1".into(),
+            headers: vec![
+                ("Host".into(), "example.test".into()),
+                ("Content-Type".into(), "application/json".into()),
+            ],
+            body: b"{\"u\":\"admin\"}".to_vec(),
+            body_truncated: false,
+        };
+        let raw = request.to_raw();
+        assert_eq!(
+            raw,
+            "POST /login?next=/admin HTTP/1.1\n\
+             Host: example.test\n\
+             Content-Type: application/json\n\
+             \n\
+             {\"u\":\"admin\"}"
+        );
+    }
+
+    #[test]
+    fn response_to_raw_maps_reason_phrase_and_flags_truncation() {
+        let response = HttpResponse {
+            status: 200,
+            http_version: "HTTP/1.1".into(),
+            headers: vec![("Content-Type".into(), "text/html".into())],
+            body: b"<h1>hi".to_vec(),
+            body_truncated: true,
+        };
+        let raw = response.to_raw();
+        assert!(raw.starts_with("HTTP/1.1 200 OK\n"));
+        assert!(raw.contains("Content-Type: text/html\n"));
+        assert!(raw.contains("<h1>hi"));
+        assert!(raw.contains("[body truncated by capture limit]"));
+    }
+
+    #[test]
+    fn response_to_raw_omits_unknown_reason_phrase() {
+        let response = HttpResponse {
+            status: 799,
+            http_version: "HTTP/1.1".into(),
+            headers: vec![],
+            body: vec![],
+            body_truncated: false,
+        };
+        assert_eq!(response.to_raw(), "HTTP/1.1 799\n\n");
     }
 }

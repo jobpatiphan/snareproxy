@@ -28,8 +28,19 @@ curl -x http://127.0.0.1:8888 --cacert "$(./target/debug/snared ca path)" https:
 ```
 เปิด `http://127.0.0.1:9000/` จะเห็น flow วิ่งเข้ามาสดๆ
 
-หรือเปิด Chromium profile ชั่วคราวที่บังคับผ่าน proxy (ปิด browser แล้ว profile
-จะถูกลบ): `./target/debug/snared browser --url https://example.com`
+### 1.1 ต่อ browser/client เข้า Snare — 3 ทางเลือก
+Snare เป็น **proxy** ไม่ผูกกับ browser ตัวไหนเอง — จับเฉพาะ client ที่ชี้มาที่ `127.0.0.1:8888`.
+เลือกตามงาน:
+
+| ทางเลือก | คำสั่ง / วิธี | เหมาะกับ | ข้อควรรู้ |
+|---|---|---|---|
+| **A. Throwaway Chromium** | `snared browser --url <url>` | ทดสอบเว็บทั่วไปเร็ว ๆ | Chromium ยิง background telemetry (gvt1/google/c2dm) ปน — ใช้ filter `host:<target>` ซ่อน; anti-bot ตรวจจับได้ |
+| **B. Manual proxy** | ตั้ง proxy `127.0.0.1:8888` ใน browser/OS + import CA (`snared ca path`) | เบราว์เซอร์จริงของคุณ | ต้อง trust CA เอง |
+| **C. Stealth browser (nodriver/CDP)** | spawn ผ่าน [[stealth-browser-mcp]] ด้วย `proxy="http://127.0.0.1:8888"` + `browser_args=["--ignore-certificate-errors"]` | **pentest/CTF ที่มี anti-bot** | undetectable + ไม่ต้อง import CA (ignore cert) + telemetry น้อยกว่า A. Snare MITM decrypt ได้ครบ → capture + writeup ตามปกติ |
+
+> **แนะนำสำหรับงาน CTF/lab จริง = C** — traffic ทั้งหมด (ผ่าน Cloudflare/anti-bot) วิ่งเข้า Snare
+> ให้ capture/annotate/writeup ได้ ในขณะที่ browser ยัง stealth. verified: spawn stealth browser
+> ชี้ proxy Snare → navigate เป้าหมาย → flow (HTTPS decrypt แล้ว) โผล่ใน dashboard ทันที.
 
 Snare เก็บ body สูงสุด 16 MiB ต่อ request/response; body ที่ใหญ่กว่านี้ยังถูก
 ส่งผ่านครบ แต่ capture จะแสดง `body_truncated` และไม่อนุญาตให้ replay แบบไม่ครบ.
@@ -103,9 +114,23 @@ CLI ดู flow: `snared flows` · ล้าง: `snared flush`
 - คลิก flow ที่มี query param → **🛡 Scan** → ยิง XSS + SQLi probe เข้าทุก param,
   ผลเป็น Medium finding ถ้าพบ indicator ที่ต่างจาก baseline. เปิด Findings ดู.
 
-### 3.8 Findings → Report
+### 3.8 Findings → Report / Writeup
 - ใน **⚠ Findings** มีลิงก์ **report ↗** (Markdown) และ **SARIF ↓** (เอาเข้า CI ได้).
   หรือ API: `GET /api/v1/report?format=md|sarif`.
+
+#### Writeup curation (Burp-style comments + narrated export)
+- **Annotate a flow** — เลือก flow แล้วกด **📝 Note** ใน detail pane: ใส่ **Label** (หัวข้อ section),
+  **Note** (คำอธิบายว่าทำไม step นี้สำคัญ), **Step** (ลำดับ), **Highlight payload** (substring ที่จะ
+  spotlight ใน transcript), และ **สี** (row highlight แบบ Burp). API: `POST /api/v1/flows/:id/note`
+  (`{label,note,step,highlight,color,include}` — partial patch), `DELETE` เพื่อลบ,
+  `GET /api/v1/annotations` ดูทั้งหมด. flow ที่ annotate จะโชว์ comment + แถบสีในตาราง.
+- **📝 Writeup panel** (toolbar) — render flow ที่ annotate แล้วเป็น **Markdown เล่าเรื่อง**: label เป็น
+  หัวข้อ, note เป็น prose, request/response เป็น ```http transcript แบบ **smart** — secret ใน header
+  ถูก **redact**, JSON body **pretty-print**, payload ถูก **spotlight** (`«…»`), body ยาวถูกตัดรอบ payload —
+  ปิดท้ายด้วย findings ที่ correlate ตาม host. กด **⧉ Copy Markdown** วางลง report ได้เลย.
+- **API/AI:** `GET /api/v1/report?format=writeup` (ใช้ flow ที่ annotate เรียงตาม step),
+  หรือ `&flows=1,2,3` เจาะจงเอง, `&highlight=<payload>` spotlight ทั่วทุก flow, `&redact=false`
+  เก็บค่า secret ดิบ, `&all=true` เอาทุก flow ที่ capture.
 
 ### 3.9 Decoder / Comparer / Sequencer
 - **🔧 Decoder**: วาง text กดปุ่ม Base64/URL/Hex/JWT (▸ encode, ◂ decode).
@@ -135,7 +160,9 @@ CLI ดู flow: `snared flows` · ล้าง: `snared flush`
            "SNARE_TOKEN": "optional-team-session-token" } }
 ```
 Tools: `proxy_list_flows`, `proxy_get_flow`, `proxy_stats`, `repeater_send`,
-`intruder_run`, `active_scan`. ทุกครั้งที่ AI เรียก tool จะเด้งขึ้น dashboard
+`intruder_run`, `active_scan`, `annotate_flow` (ติด label/note/step/highlight ให้ flow),
+`report_writeup` (render flow ที่ annotate → Markdown writeup เล่าเรื่อง redact+highlight พร้อมวาง).
+ทุกครั้งที่ AI เรียก tool จะเด้งขึ้น dashboard
 (banner ม่วง 🤖) — เปิด **🔔 Popups** ให้เด้ง desktop notification ด้วยได้.
 
 ---
