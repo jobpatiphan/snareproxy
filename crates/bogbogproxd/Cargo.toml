@@ -30,3 +30,7 @@ postgres = "0.19"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "gzip", "deflate"] }
 regex.workspace = true
 url.workspace = true
+# CDP bridge: talk to the embedded browser's DevTools protocol to learn each
+# request's initiator (which script/line). Plain ws:// on localhost — no TLS.
+tokio-tungstenite = "0.24"
+futures-util = "0.3"

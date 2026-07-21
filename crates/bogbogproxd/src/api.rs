@@ -62,6 +62,8 @@ pub struct AppState {
     /// Path to the MITM CA certificate — served by the in-app CA tutorial so
     /// operators can download and trust it in other browsers.
     pub ca_cert_path: std::path::PathBuf,
+    /// Request-initiator map filled by the CDP bridge for the embedded browser.
+    pub initiator_sink: bogbogprox_core::model::InitiatorSink,
 }
 
 impl AppState {
@@ -1161,8 +1163,20 @@ async fn browser_launch(State(st): State<AppState>, Json(b): Json<BrowserLaunch>
         .filter(|u| !u.trim().is_empty())
         .unwrap_or_else(|| "about:blank".to_string());
     let proxy = st.proxy_addr;
-    match tokio::task::spawn_blocking(move || crate::launch_browser_detached(proxy, &url)).await {
-        Ok(Ok(browser)) => Json(json!({ "ok": true, "browser": browser })).into_response(),
+    // Pick a debug port for the CDP initiator bridge (spread by pid to avoid the
+    // common 9222 collision when several are opened).
+    let debug_port = 9222 + (std::process::id() % 200) as u16;
+    let sink = st.initiator_sink.clone();
+    match tokio::task::spawn_blocking(move || {
+        crate::launch_browser_detached(proxy, &url, Some(debug_port))
+    })
+    .await
+    {
+        Ok(Ok(browser)) => {
+            // Attach the CDP bridge in the background to learn request initiators.
+            tokio::spawn(crate::cdp::attach(debug_port, sink));
+            Json(json!({ "ok": true, "browser": browser })).into_response()
+        }
         Ok(Err(e)) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({ "ok": false, "error": e.to_string() })),

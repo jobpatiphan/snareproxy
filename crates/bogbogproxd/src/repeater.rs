@@ -40,6 +40,7 @@ fn summary_of_request(id: i64, ts: i64, req: &HttpRequest, source: Source) -> Fl
         resp_size: None,
         duration_ms: None,
         connect_ms: None,
+        initiator: None,
         wait_ms: None,
         download_ms: None,
     }

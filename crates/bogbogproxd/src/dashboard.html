@@ -345,6 +345,7 @@
   #dMeta .wf .seg{height:100%}
   #dMeta .wf .conn{background:#58a6ff} #dMeta .wf .wait{background:#d9b02b} #dMeta .wf .dl{background:#3fb950}
   #dMeta .lg-conn{color:#58a6ff} #dMeta .lg-wait{color:#d9b02b} #dMeta .lg-dl{color:#3fb950}
+  #dMeta .lg-init{color:var(--accent)}
 </style>
 </head>
 <body>
@@ -857,7 +858,8 @@ Import-Certificate -FilePath bogbogprox-ca.pem `
   function renderMeta(s){
     const m = $('dMeta');
     if(!s){ m.classList.remove('show'); m.innerHTML=''; return; }
-    let html = `<div class="row">🕑 <b>${fullDateTime(s.ts)}</b><span>flow #${s.id}</span></div>`;
+    let html = `<div class="row">🕑 <b>${fullDateTime(s.ts)}</b><span>flow #${s.id}</span>`+
+      (s.initiator ? `<span class="lg-init">🔗 ${esc(s.initiator)}</span>` : ``)+`</div>`;
     if(s.wait_ms!=null && s.download_ms!=null){
       const tot = s.duration_ms || (s.wait_ms + s.download_ms) || 1;
       const conn = s.connect_ms || 0;

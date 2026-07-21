@@ -16,7 +16,8 @@ pub mod ws;
 
 pub use annotate::{Annotation, AnnotationPatch, Annotations};
 pub use model::{
-    Activity, Flow, FlowEvent, FlowSummary, Header, HttpRequest, HttpResponse, Source,
+    Activity, Flow, FlowEvent, FlowSummary, Header, HttpRequest, HttpResponse, InitiatorSink,
+    Source,
 };
 pub use render::RenderOpts;
 pub use store::{FlowQuery, FlowStore};

@@ -3,6 +3,7 @@
 mod active_scan;
 mod api;
 mod auth;
+mod cdp;
 mod config;
 mod intruder;
 mod macros;
@@ -209,6 +210,9 @@ async fn cmd_run(
     let vars = Arc::new(bogbogprox_core::session::Vars::new());
     let session_macros = Arc::new(bogbogprox_core::session::Macros::new());
     let annotations = Arc::new(bogbogprox_core::annotate::Annotations::new());
+    // Shared request-initiator map, filled by the CDP bridge when a browser is
+    // attached, read by the engine to tag flows.
+    let initiator_sink: bogbogprox_core::model::InitiatorSink = Default::default();
 
     // Restore persisted state (rules / scope / scanner / vars / macros / notes).
     if let Some(persisted) = config_backend.load() {
@@ -285,6 +289,7 @@ async fn cmd_run(
         config: config_backend,
         proxy_addr,
         ca_cert_path: paths.ca_cert(),
+        initiator_sink: initiator_sink.clone(),
     });
     let listener = tokio::net::TcpListener::bind(api_addr)
         .await
@@ -335,6 +340,7 @@ async fn cmd_run(
         vars,
         wslog,
         plugins,
+        initiator_sink: initiator_sink.clone(),
     };
     bogbogprox_engine::run(cfg, services, async {
         let _ = tokio::signal::ctrl_c().await;
@@ -373,8 +379,13 @@ fn make_browser_profile() -> Result<std::path::PathBuf> {
 /// Chromium flags that wire the browser to the proxy, accept the MITM cert, and
 /// silence Chromium's phone-home traffic so the only flows captured are the ones
 /// *you* generate — not component updates, Safe Browsing, sync, or NTP pings.
-fn browser_flags(proxy: SocketAddr, profile: &std::path::Path, url: &str) -> Vec<String> {
-    vec![
+fn browser_flags(
+    proxy: SocketAddr,
+    profile: &std::path::Path,
+    url: &str,
+    debug_port: Option<u16>,
+) -> Vec<String> {
+    let mut flags = vec![
         format!("--proxy-server=http://{proxy}"),
         "--proxy-bypass-list=<-loopback>".into(),
         "--ignore-certificate-errors".into(),
@@ -392,16 +403,28 @@ fn browser_flags(proxy: SocketAddr, profile: &std::path::Path, url: &str) -> Vec
         "--no-pings".into(),
         "--metrics-recording-only".into(),
         "--disable-features=OptimizationHints,Translate,MediaRouter,InterestFeedContentSuggestions,ChromeWhatsNewUI".into(),
-        url.to_string(),
-    ]
+    ];
+    if let Some(port) = debug_port {
+        // Expose the DevTools protocol so the CDP bridge can read request
+        // initiators. `remote-allow-origins=*` is required (Chrome ≥111) for a
+        // non-browser client to open the debugger websocket.
+        flags.push(format!("--remote-debugging-port={port}"));
+        flags.push("--remote-allow-origins=*".into());
+    }
+    flags.push(url.to_string()); // URL must stay last
+    flags
 }
 
 /// Spawn the throwaway browser fire-and-forget and reap its temp profile when it
 /// exits. Returns the browser binary that launched. Used by the dashboard's
 /// "Open browser" button so the operator never touches the CLI.
-pub(crate) fn launch_browser_detached(proxy: SocketAddr, url: &str) -> Result<String> {
+pub(crate) fn launch_browser_detached(
+    proxy: SocketAddr,
+    url: &str,
+    debug_port: Option<u16>,
+) -> Result<String> {
     let profile = make_browser_profile()?;
-    let flags = browser_flags(proxy, &profile, url);
+    let flags = browser_flags(proxy, &profile, url, debug_port);
     let mut failures = Vec::new();
     for browser in BROWSER_CANDIDATES {
         match std::process::Command::new(browser).args(&flags).spawn() {
@@ -441,7 +464,7 @@ fn cmd_browser(proxy: SocketAddr, url: &str) -> Result<()> {
         }
     }
     let _profile_guard = ProfileGuard(profile.clone());
-    let flags = browser_flags(proxy, &profile, url);
+    let flags = browser_flags(proxy, &profile, url, None);
 
     let mut failures = Vec::new();
     for browser in BROWSER_CANDIDATES {

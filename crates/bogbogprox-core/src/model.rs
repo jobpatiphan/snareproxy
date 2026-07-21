@@ -216,7 +216,17 @@ pub struct FlowSummary {
     /// Waterfall (live only): time spent reading the response body.
     #[serde(default)]
     pub download_ms: Option<u64>,
+    /// Who initiated the request, from the browser via CDP (live only): e.g.
+    /// "script app.js:42 render()" / "parser" / "user". `None` when no CDP
+    /// browser is attached or the request came from another client.
+    #[serde(default)]
+    pub initiator: Option<String>,
 }
+
+/// Shared map of `request URL → (initiator label, unix-ms)` populated by the CDP
+/// bridge when an instrumented browser is attached, read by the engine to tag
+/// flows. Best-effort: keyed by URL, newest wins, pruned by capacity.
+pub type InitiatorSink = std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, (String, i64)>>>;
 
 /// An AI / automation action, surfaced live so the operator can watch — in
 /// real time — exactly what an agent driving BogBogProx is doing.

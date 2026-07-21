@@ -550,6 +550,7 @@ mod tests {
             resp_size: None,
             duration_ms: None,
             connect_ms: None,
+            initiator: None,
             wait_ms: None,
             download_ms: None,
         }

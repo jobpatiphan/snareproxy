@@ -321,6 +321,7 @@ impl FlowStore for PostgresStore {
                     resp_size: r.get::<_, Option<i64>>(10).map(|v| v as u64),
                     duration_ms: r.get::<_, Option<i64>>(11).map(|v| v as u64),
                     connect_ms: None,
+                    initiator: None,
                     wait_ms: None,
                     download_ms: None,
                 })

@@ -165,6 +165,8 @@ struct CaptureHandler {
     plugins: Arc<bogbogprox_plugin::PluginHost>,
     /// Connect-time measurements from the instrumented connector (per host).
     connect_sink: ConnectSink,
+    /// Request-initiator labels from the attached CDP browser (per URL).
+    initiator_sink: bogbogprox_core::model::InitiatorSink,
     /// Outstanding (flow_id, started, host) tuples, oldest first. Host lets
     /// response interception honour scope.
     pending: VecDeque<(i64, Instant, String)>,
@@ -282,6 +284,7 @@ fn summary_of_request(id: i64, ts: i64, req: &HttpRequest) -> FlowSummary {
         resp_size: None,
         duration_ms: None,
         connect_ms: None,
+        initiator: None,
         wait_ms: None,
         download_ms: None,
     }
@@ -587,6 +590,12 @@ impl HttpHandler for CaptureHandler {
                     .lock()
                     .ok()
                     .and_then(|mut m| m.get_mut(&flow.request.host).and_then(|q| q.pop_front()));
+                // Who initiated this request, if a CDP browser reported it.
+                summary.initiator = self
+                    .initiator_sink
+                    .lock()
+                    .ok()
+                    .and_then(|m| m.get(&flow.request.url()).map(|(s, _)| s.clone()));
                 let _ = self.events.send(FlowEvent::FlowUpdate { summary });
                 // Passive scan the completed flow; stream any new findings.
                 for finding in self.scanner.scan(&flow) {
@@ -661,6 +670,7 @@ pub struct EngineServices {
     pub vars: Arc<Vars>,
     pub wslog: Arc<WsLog>,
     pub plugins: Arc<bogbogprox_plugin::PluginHost>,
+    pub initiator_sink: bogbogprox_core::model::InitiatorSink,
 }
 
 /// Run the proxy until `shutdown` resolves.
@@ -678,6 +688,7 @@ where
         vars,
         wslog,
         plugins,
+        initiator_sink,
     } = services;
     let connect_sink: ConnectSink = Arc::new(StdMutex::new(HashMap::new()));
 
@@ -690,6 +701,7 @@ where
         vars,
         plugins,
         connect_sink: connect_sink.clone(),
+        initiator_sink,
         pending: VecDeque::new(),
     };
     let ws_handler = WsHandler { events, wslog };
