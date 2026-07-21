@@ -1,0 +1,12 @@
+[package]
+name = "bogbogprox-store-sqlite"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+bogbogprox-core.workspace = true
+anyhow.workspace = true
+rusqlite.workspace = true
+serde_json.workspace = true

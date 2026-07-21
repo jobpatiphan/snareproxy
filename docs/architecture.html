@@ -226,9 +226,9 @@
         <div class="stage"><pre class="mermaid">
 %%{init:{'theme':'base','themeVariables':{'background':'#15141d','primaryColor':'#201e2e','primaryTextColor':'#e7e5f0','primaryBorderColor':'#8b90ff','lineColor':'#6f6d8a','secondaryColor':'#17313a','tertiaryColor':'#1a1826','fontFamily':'ui-monospace, monospace','fontSize':'14px'}}}%%
 flowchart LR
-  B["Browser / curl / tool"] -->|"proxy :8888"| E["snare-engine<br/>data plane · hudsucker"]
+  B["Browser / curl / tool"] -->|"proxy :8888"| E["bogbogprox-engine<br/>data plane · hudsucker"]
   E -->|"MITM TLS"| T["Target site"]
-  E --> C["snare-core<br/>intercept · rules · scanner<br/>session · ws · plugins"]
+  E --> C["bogbogprox-core<br/>intercept · rules · scanner<br/>session · ws · plugins"]
   C --> S[("Store<br/>SQLite / Postgres")]
   C --> EV(("Event bus"))
   EV -->|SSE| UI["Web · TUI · Desktop"]
@@ -243,11 +243,11 @@ flowchart LR
     <div class="spine"><div class="node">2</div></div>
     <div class="col">
       <h2>แผนที่ crate<span class="th">Workspace structure · 9 crates</span></h2>
-      <p>logic แกนอยู่ใน <code>snare-core</code> — ไม่รู้จัก proxy, HTTP หรือ DB เลย. ทุกอย่างพึ่ง core;
-        adapter พึ่ง core; แล้ว <code>snared</code> ประกอบทุกชิ้นเข้าด้วยกัน. เปลี่ยน backend หรือเพิ่ม frontend
+      <p>logic แกนอยู่ใน <code>bogbogprox-core</code> — ไม่รู้จัก proxy, HTTP หรือ DB เลย. ทุกอย่างพึ่ง core;
+        adapter พึ่ง core; แล้ว <code>bogbogproxd</code> ประกอบทุกชิ้นเข้าด้วยกัน. เปลี่ยน backend หรือเพิ่ม frontend
         จึงไม่กระเทือนแกน.</p>
 <pre class="code"><span class="c">crates/</span>
-<span class="p">snare-core</span>            <span class="c"># โมเดล + trait + coordinators (ไม่มี I/O ของ proxy)</span>
+<span class="p">bogbogprox-core</span>            <span class="c"># โมเดล + trait + coordinators (ไม่มี I/O ของ proxy)</span>
   ├ model            <span class="c">#   Flow / HttpRequest / HttpResponse / FlowEvent</span>
   ├ store            <span class="c">#   trait FlowStore  ← storage port</span>
   ├ intercept        <span class="c">#   breakpoint coordinator (oneshot ต่อ item)</span>
@@ -255,14 +255,14 @@ flowchart LR
   ├ scanner          <span class="c">#   passive findings + dedup</span>
   ├ session          <span class="c">#   Vars + Macros</span>
   └ ws               <span class="c">#   WsLog (WebSocket messages)</span>
-<span class="p">snare-store-sqlite</span>    <span class="c"># FlowStore ← SQLite (Mutex&lt;Connection&gt;)   [local]</span>
-<span class="p">snare-store-postgres</span>  <span class="c"># FlowStore ← Postgres (DB-actor thread)   [team]</span>
-<span class="p">snare-engine</span>          <span class="c"># data plane: hudsucker (hyper+rustls) + capture + hooks</span>
-<span class="p">snare-plugin</span>          <span class="c"># WASM plugin host (wasmtime component model)</span>
-<span class="p">snared</span>                <span class="c"># the daemon: engine + REST/SSE + auth + config + pubsub</span>
-<span class="p">snare-tui</span>             <span class="c"># ratatui frontend (REST+SSE client)</span>
-<span class="p">snare-desktop</span>         <span class="c"># Tauri native window → dashboard</span>
-<span class="p">snare-mcp</span>             <span class="c"># stdio MCP server (AI ขับผ่าน API)</span></pre>
+<span class="p">bogbogprox-store-sqlite</span>    <span class="c"># FlowStore ← SQLite (Mutex&lt;Connection&gt;)   [local]</span>
+<span class="p">bogbogprox-store-postgres</span>  <span class="c"># FlowStore ← Postgres (DB-actor thread)   [team]</span>
+<span class="p">bogbogprox-engine</span>          <span class="c"># data plane: hudsucker (hyper+rustls) + capture + hooks</span>
+<span class="p">bogbogprox-plugin</span>          <span class="c"># WASM plugin host (wasmtime component model)</span>
+<span class="p">bogbogproxd</span>                <span class="c"># the daemon: engine + REST/SSE + auth + config + pubsub</span>
+<span class="p">bogbogprox-tui</span>             <span class="c"># ratatui frontend (REST+SSE client)</span>
+<span class="p">bogbogprox-desktop</span>         <span class="c"># Tauri native window → dashboard</span>
+<span class="p">bogbogprox-mcp</span>             <span class="c"># stdio MCP server (AI ขับผ่าน API)</span></pre>
     </div>
   </div></section>
 
@@ -274,21 +274,21 @@ flowchart LR
       <p>แยกชัดสองระนาบ แต่ทั้งคู่ถือ <strong>coordinator ตัวเดียวกัน</strong> ผ่าน <code>Arc</code> —
         นี่คือกลไกที่ทำให้ "กดปุ่มบน dashboard" ไปมีผลกับ "traffic ที่กำลังวิ่ง" ได้ทันที.</p>
       <ul>
-        <li><strong>Data plane</strong> (<code>snare-engine</code>) — เส้นที่ traffic จริงวิ่ง. ต้องเร็ว, ต่อ connection. hudsucker เรียก handler ต่อ request/response.</li>
-        <li><strong>Control plane</strong> (<code>snared</code> REST/SSE) — คน/AI สั่งงาน: toggle intercept, add rule, ยิง intruder.</li>
+        <li><strong>Data plane</strong> (<code>bogbogprox-engine</code>) — เส้นที่ traffic จริงวิ่ง. ต้องเร็ว, ต่อ connection. hudsucker เรียก handler ต่อ request/response.</li>
+        <li><strong>Control plane</strong> (<code>bogbogproxd</code> REST/SSE) — คน/AI สั่งงาน: toggle intercept, add rule, ยิง intruder.</li>
       </ul>
       <div class="scope">
         <div class="bar"><span class="dot" style="background:#f0685a"></span><span class="dot" style="background:#e0a63a"></span><span class="dot" style="background:#46c47e"></span><span class="t">shared coordinators (Arc)</span></div>
         <div class="stage"><pre class="mermaid">
 %%{init:{'theme':'base','themeVariables':{'background':'#15141d','primaryColor':'#201e2e','primaryTextColor':'#e7e5f0','primaryBorderColor':'#8b90ff','lineColor':'#6f6d8a','clusterBkg':'#141320','clusterBorder':'#34324a','fontFamily':'ui-monospace, monospace','fontSize':'13px'}}}%%
 flowchart TB
-  subgraph DP["DATA PLANE · snare-engine"]
+  subgraph DP["DATA PLANE · bogbogprox-engine"]
     H["CaptureHandler<br/>per connection"]
   end
-  subgraph SH["SHARED · snare-core (Arc)"]
+  subgraph SH["SHARED · bogbogprox-core (Arc)"]
     IC["Intercept"]; RU["Rules"]; SC["Scanner"]; VA["Vars"]; PL["PluginHost"]; BUS(("events"))
   end
-  subgraph CP["CONTROL PLANE · snared axum"]
+  subgraph CP["CONTROL PLANE · bogbogproxd axum"]
     API["REST /api/v1/*"]; SSE["SSE /stream"]
   end
   H --- IC & RU & SC & VA & PL & BUS
@@ -388,7 +388,7 @@ sequenceDiagram
   Px-->>Br: 200 Connection established
   Note over Px: แทนที่จะเปิดท่อเฉยๆ<br/>Px สวมเป็น "site" (MITM)
   Br->>Px: TLS ClientHello (คิดว่าคุยกับ site)
-  Px-->>Br: leaf cert ออกสดๆ · ลงนามด้วย Snare CA
+  Px-->>Br: leaf cert ออกสดๆ · ลงนามด้วย BogBogProx CA
   Px->>Tg: เปิด TLS เส้นที่สองไป site จริง (verify cert จริง)
   Br->>Px: (decrypted) GET /path
   Px->>Tg: forward
@@ -398,22 +398,22 @@ sequenceDiagram
       <h3>5.2 · TLS MITM ทำยังไง (hudsucker)</h3>
       <ol class="steps">
         <li><div><span class="h">รับ CONNECT → ตอบ 200</span> <span class="d">เริ่ม TLS handshake กับ browser โดยสวมเป็น site</span></div></li>
-        <li><div><span class="h">ออก leaf cert ของ site สดๆ (rcgen)</span> <span class="d">ลงนามด้วย Snare CA แล้ว cache ไว้</span></div></li>
-        <li><div><span class="h">browser handshake สำเร็จ</span> <span class="d">เพราะ trust Snare CA → คุย plaintext กับ proxy</span></div></li>
+        <li><div><span class="h">ออก leaf cert ของ site สดๆ (rcgen)</span> <span class="d">ลงนามด้วย BogBogProx CA แล้ว cache ไว้</span></div></li>
+        <li><div><span class="h">browser handshake สำเร็จ</span> <span class="d">เพราะ trust BogBogProx CA → คุย plaintext กับ proxy</span></div></li>
         <li><div><span class="h">proxy อ่าน request ที่ decrypt แล้ว</span> <span class="d">มาถึง handler เป็น origin-form · เปิด TLS เส้นสองไป site จริง · forward</span></div></li>
       </ol>
       <p>ผลคือ proxy <strong>เห็นและแก้ HTTPS ได้เต็ม</strong> ทั้งที่ browser กับ site ยังคิดว่าคุย TLS ปกติ.</p>
 
       <h3>5.3 · CA &amp; trust — ทำไมต้องติดตั้ง cert</h3>
-      <p>Snare สร้าง <strong>CA เฉพาะเครื่อง</strong> (<code>snared ca generate</code> → <code>~/.config/snare/ca/snare-ca.pem</code> + <code>.key</code> perms 0600).
-        leaf cert ทุกใบลงนามด้วย CA นี้; browser จะ trust ก็ต่อเมื่อ <strong>ติดตั้ง <code>snare-ca.pem</code> ใน trust store</strong>.</p>
+      <p>BogBogProx สร้าง <strong>CA เฉพาะเครื่อง</strong> (<code>bogbogproxd ca generate</code> → <code>~/.config/bogbogprox/ca/bogbogprox-ca.pem</code> + <code>.key</code> perms 0600).
+        leaf cert ทุกใบลงนามด้วย CA นี้; browser จะ trust ก็ต่อเมื่อ <strong>ติดตั้ง <code>bogbogprox-ca.pem</code> ใน trust store</strong>.</p>
       <div class="note warn"><span class="k">ระวัง</span>
         ห้ามแชร์/commit CA นี้ — ใครมี key = MITM traffic ของคุณได้. <code>.gitignore</code> กัน <code>*.key/*.pem</code> ไว้แล้ว.
         ถ้าไม่ติดตั้ง → browser ขึ้น cert error.</div>
 
-      <h3>5.4 · managed browser — <code>snared browser</code></h3>
+      <h3>5.4 · managed browser — <code>bogbogproxd browser</code></h3>
       <p>เพื่อความสะดวก (เหมือน Burp embedded browser) มี subcommand เปิด Chromium ที่ตั้งค่าให้เสร็จ:</p>
-<pre class="code"><span class="k">snared browser</span> --url https://target.com
+<pre class="code"><span class="k">bogbogproxd browser</span> --url https://target.com
 <span class="c"># = chromium --proxy-server=http://127.0.0.1:8888 \</span>
 <span class="c">#            --ignore-certificate-errors \</span>
 <span class="c">#            --user-data-dir=&lt;throwaway&gt; ...</span></pre>
@@ -463,7 +463,7 @@ flowchart LR
         หลาย daemon start พร้อมกันบน DB ว่าง race กันที่ <code>CREATE TABLE IF NOT EXISTS</code> (pg_type unique violation) →
         กันด้วย <code>pg_advisory_lock</code> เป็น statement แยก autocommit ก่อน DDL.</div>
       <p><strong>Config backend:</strong> <code>Backend { Local(file) | Postgres }</code> — rules/scope/vars/macros/scanner persist เป็น
-        <code>config.json</code> (local) หรือตาราง <code>snare_settings</code> (team, แชร์กัน).</p>
+        <code>config.json</code> (local) หรือตาราง <code>bogbogprox_settings</code> (team, แชร์กัน).</p>
     </div>
   </div></section>
 
@@ -483,7 +483,7 @@ flowchart LR
 %%{init:{'theme':'base','themeVariables':{'background':'#15141d','primaryColor':'#201e2e','primaryTextColor':'#e7e5f0','primaryBorderColor':'#8b90ff','lineColor':'#6f6d8a','clusterBkg':'#141320','clusterBorder':'#34324a','fontFamily':'ui-monospace, monospace','fontSize':'12.5px'}}}%%
 flowchart LR
   subgraph DA["daemon A"]
-    LA(("local bus")) -->|"publish +origin=A"| PGN[("NOTIFY snare_events")]
+    LA(("local bus")) -->|"publish +origin=A"| PGN[("NOTIFY bogbogprox_events")]
     PGN -->|LISTEN| RA(("remote bus A"))
     LA --> SA["SSE (A)"]
   end
@@ -539,7 +539,7 @@ flowchart LR
     <div class="spine"><div class="node">10</div></div>
     <div class="col">
       <h2>Plugin architecture<span class="th">WASM component model · wasmtime · fuel-metered</span></h2>
-      <p><code>snare-plugin</code> เป็น wasmtime component-model host. Contract ผ่าน WIT: plugin export <code>hooks</code>
+      <p><code>bogbogprox-plugin</code> เป็น wasmtime component-model host. Contract ผ่าน WIT: plugin export <code>hooks</code>
         (name/on-request/on-response), host export <code>log</code> capability.</p>
       <div class="scope">
         <div class="bar"><span class="dot" style="background:#f0685a"></span><span class="dot" style="background:#e0a63a"></span><span class="dot" style="background:#46c47e"></span><span class="t">sandboxed guest · per-call instance</span></div>
@@ -547,7 +547,7 @@ flowchart LR
 %%{init:{'theme':'base','themeVariables':{'background':'#15141d','primaryColor':'#201e2e','primaryTextColor':'#e7e5f0','primaryBorderColor':'#8b90ff','lineColor':'#6f6d8a','clusterBkg':'#141320','clusterBorder':'#34324a','fontFamily':'ui-monospace, monospace','fontSize':'12.5px'}}}%%
 flowchart LR
   ENG["engine handle_request"] -->|"Req"| ST
-  subgraph H["snare-plugin · host"]
+  subgraph H["bogbogprox-plugin · host"]
     L["load .wasm from plugins/"] --> ST["per-call:<br/>new Store + fuel 200M<br/>+ instantiate"]
   end
   ST -->|"on-request"| G["guest component<br/>Rust / Go / JS → WASM"]
@@ -591,27 +591,27 @@ flowchart LR
     <div class="col">
       <h2>Running modes &amp; config<span class="th">local · team · เครื่องมือ</span></h2>
 <pre class="code"><span class="c"># Local (SQLite, ไม่มี auth)</span>
-<span class="k">snared run</span>                       <span class="c"># proxy :8888 · dashboard :9000</span>
+<span class="k">bogbogproxd run</span>                       <span class="c"># proxy :8888 · dashboard :9000</span>
 
 <span class="c"># Team (Postgres + auth) — secrets ผ่าน env</span>
-<span class="p">SNARE_POSTGRES</span>=postgres://snare:snare@host/snare \
-<span class="p">SNARE_AUTH_TOKEN</span>=SECRET <span class="k">snared run</span>
+<span class="p">BOGBOGPROX_POSTGRES</span>=postgres://bogbogprox:bogbogprox@host/bogbogprox \
+<span class="p">BOGBOGPROX_AUTH_TOKEN</span>=SECRET <span class="k">bogbogproxd run</span>
 
 <span class="c"># เปลี่ยนพอร์ต</span>
-<span class="k">snared run</span> --proxy 127.0.0.1:9999 --api 127.0.0.1:9001
+<span class="k">bogbogproxd run</span> --proxy 127.0.0.1:9999 --api 127.0.0.1:9001
 
 <span class="c"># เครื่องมืออื่น</span>
-<span class="k">snared</span> ca generate | ca path          <span class="c"># CA</span>
-<span class="k">snared</span> browser --url https://target   <span class="c"># managed browser</span>
-<span class="k">snared</span> flows | flush                   <span class="c"># CLI</span>
-<span class="k">snare-tui</span> [--api https://.. --token ..]
-<span class="k">snare-desktop</span>                        <span class="c"># native window</span>
-<span class="k">snare-mcp</span>                            <span class="c"># MCP (env SNARE_API / SNARE_TOKEN)</span></pre>
+<span class="k">bogbogproxd</span> ca generate | ca path          <span class="c"># CA</span>
+<span class="k">bogbogproxd</span> browser --url https://target   <span class="c"># managed browser</span>
+<span class="k">bogbogproxd</span> flows | flush                   <span class="c"># CLI</span>
+<span class="k">bogbogprox-tui</span> [--api https://.. --token ..]
+<span class="k">bogbogprox-desktop</span>                        <span class="c"># native window</span>
+<span class="k">bogbogprox-mcp</span>                            <span class="c"># MCP (env BOGBOGPROX_API / BOGBOGPROX_TOKEN)</span></pre>
       <div class="kv">
-        <dt>~/.config/snare/ca/</dt><dd>CA (override ทั้งหมดด้วย <code>SNARE_HOME</code>)</dd>
-        <dt>~/.config/snare/config.json</dt><dd>settings</dd>
-        <dt>~/.config/snare/plugins/*.wasm</dt><dd>plugins</dd>
-        <dt>~/.local/share/snare/flows.sqlite</dt><dd>flows (local)</dd>
+        <dt>~/.config/bogbogprox/ca/</dt><dd>CA (override ทั้งหมดด้วย <code>BOGBOGPROX_HOME</code>)</dd>
+        <dt>~/.config/bogbogprox/config.json</dt><dd>settings</dd>
+        <dt>~/.config/bogbogprox/plugins/*.wasm</dt><dd>plugins</dd>
+        <dt>~/.local/share/bogbogprox/flows.sqlite</dt><dd>flows (local)</dd>
         <dt>ports</dt><dd>proxy 8888 · API+dashboard 9000 · Postgres 5432</dd>
       </div>
     </div>

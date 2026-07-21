@@ -1,0 +1,32 @@
+[package]
+name = "bogbogproxd"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "bogbogproxd"
+path = "src/main.rs"
+
+[dependencies]
+bogbogprox-core.workspace = true
+bogbogprox-engine.workspace = true
+bogbogprox-store-sqlite.workspace = true
+bogbogprox-store-postgres = { path = "../bogbogprox-store-postgres" }
+bogbogprox-plugin = { path = "../bogbogprox-plugin" }
+anyhow.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+clap.workspace = true
+directories.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+axum = "0.7"
+tokio-stream = { version = "0.1", features = ["sync"] }
+getrandom = "0.2"
+postgres = "0.19"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "gzip", "deflate"] }
+regex.workspace = true
+url.workspace = true

@@ -1,0 +1,1409 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>🪤 BogBogProx — Live</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --panel2:#0d1117; --line:#21262d;
+    --fg:#e6edf3; --dim:#8b949e; --accent:#d29922; --accent2:#f0b429;
+    --ok:#3fb950; --warn:#d29922; --err:#f85149; --info:#58a6ff; --purple:#bc8cff;
+    --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+    display:flex;flex-direction:column;height:100vh;overflow:hidden;font-size:13px}
+
+  header{display:flex;align-items:center;gap:14px;padding:8px 14px;background:var(--panel);
+    border-bottom:1px solid var(--line);flex:none}
+  header .logo{font-weight:700;font-size:15px;letter-spacing:.3px}
+  header .logo small{color:var(--dim);font-weight:400}
+  .dot{width:9px;height:9px;border-radius:50%;background:var(--err);box-shadow:0 0 0 0 rgba(63,185,80,.6)}
+  .dot.on{background:var(--ok);animation:pulse 2s infinite}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(63,185,80,.5)}70%{box-shadow:0 0 0 7px rgba(63,185,80,0)}100%{box-shadow:0 0 0 0 rgba(63,185,80,0)}}
+  header .grow{flex:1}
+  header input[type=text]{background:var(--panel2);border:1px solid var(--line);color:var(--fg);
+    padding:5px 9px;border-radius:6px;width:240px;font-family:var(--mono);font-size:12px}
+  header button{background:var(--panel2);border:1px solid var(--line);color:var(--fg);
+    padding:5px 10px;border-radius:6px;cursor:pointer;font-size:12px}
+  header button:hover{border-color:var(--dim)}
+  header button.active{background:var(--accent);color:#000;border-color:var(--accent);font-weight:600}
+  .stat{color:var(--dim);font-family:var(--mono);font-size:12px}
+  .stat b{color:var(--fg)}
+  .ops{color:var(--ok);font-size:12px} .ops:empty{display:none}
+
+  /* AI activity banner */
+  #ai{display:none;align-items:center;gap:12px;padding:9px 14px;background:linear-gradient(90deg,#2d1b4e,#161b22);
+    border-bottom:1px solid var(--purple);flex:none;font-size:13px}
+  #ai.show{display:flex}
+  #ai.flash{animation:aiflash .8s ease}
+  @keyframes aiflash{0%{background:linear-gradient(90deg,#4b2d7a,#2d1b4e)}100%{background:linear-gradient(90deg,#2d1b4e,#161b22)}}
+  #ai .bot{font-size:20px;animation:bob 1.4s ease-in-out infinite}
+  @keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}
+  #ai .who{color:var(--purple);font-weight:700}
+  #ai .what{color:var(--fg)}
+  #ai .detail{color:var(--dim)}
+  #ai .ago{margin-left:auto;color:var(--dim);font-family:var(--mono);font-size:11px}
+
+  main{flex:1;display:flex;min-height:0}
+  .col-flows{flex:1;min-width:0;display:flex;flex-direction:column;border-right:1px solid var(--line)}
+  .col-detail{width:44%;min-width:340px;display:flex;flex-direction:column;background:var(--panel2)}
+
+  .scroll{overflow:auto;flex:1}
+  table{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:12px}
+  thead th{position:sticky;top:0;background:var(--panel);color:var(--dim);text-align:left;
+    padding:6px 8px;border-bottom:1px solid var(--line);font-weight:600;z-index:1;white-space:nowrap}
+  tbody td{padding:5px 8px;border-bottom:1px solid var(--line);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  tbody tr{cursor:pointer}
+  tbody tr:hover{background:#1c2230}
+  tbody tr.sel{background:#243049}
+  tr.fresh{animation:fresh 1.4s ease}
+  @keyframes fresh{0%{background:#3a2f10}100%{background:transparent}}
+  .m{font-weight:700}
+  .m-GET{color:var(--ok)} .m-POST{color:var(--accent2)} .m-PUT{color:var(--info)}
+  .m-DELETE{color:var(--err)} .m-PATCH{color:var(--purple)} .m-HEAD,.m-OPTIONS{color:var(--dim)}
+  .s2{color:var(--ok)} .s3{color:var(--info)} .s4{color:var(--warn)} .s5{color:var(--err)} .s0{color:var(--dim)}
+  .url{color:var(--fg)} .host{color:var(--dim)}
+  .col-num{width:52px;color:var(--dim)} .col-time{width:74px;color:var(--dim)}
+  .col-sz,.col-ms{width:64px;text-align:right;color:var(--dim)}
+
+  .detail-head{padding:8px 12px;border-bottom:1px solid var(--line);background:var(--panel);
+    font-family:var(--mono);font-size:12px;display:flex;gap:8px;align-items:center;flex:none}
+  .detail-head button{background:var(--accent);color:#000;border:0;padding:3px 10px;border-radius:6px;
+    cursor:pointer;font-weight:700;font-size:12px}
+  .detail-head button:hover{background:var(--accent2)} .detail-head button:disabled{opacity:.5;cursor:default}
+  .rep{color:var(--accent2);font-weight:700;margin-right:3px}
+  .tabs{display:flex;gap:4px;padding:6px 10px;border-bottom:1px solid var(--line);flex:none}
+  .tabs button{background:transparent;border:1px solid var(--line);color:var(--dim);
+    padding:3px 12px;border-radius:6px;cursor:pointer;font-size:12px}
+  .tabs button.active{color:var(--fg);border-color:var(--accent);background:#1c2230}
+  pre.body{margin:0;padding:10px 12px;font-family:var(--mono);font-size:12px;white-space:pre-wrap;
+    word-break:break-word;overflow:auto;flex:1;color:#c9d1d9;line-height:1.5}
+  .kv{color:var(--dim)} .kv b{color:var(--info);font-weight:400}
+  .gql{color:var(--purple);font-weight:700} .gqlq{color:#c8a9ff}
+  .empty{color:var(--dim);padding:26px;text-align:center;font-style:italic}
+
+  /* Login overlay (team mode) */
+  #login{position:fixed;inset:0;background:#0d1117;display:none;align-items:center;justify-content:center;z-index:50}
+  #login.show{display:flex}
+  #login .lbox{width:min(360px,90vw);background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:26px;display:flex;flex-direction:column;gap:12px}
+  #login .lh{font-size:18px;font-weight:700}
+  #login .lp{color:var(--dim);font-size:13px;margin:0}
+  #login input{background:var(--panel2);border:1px solid var(--line);color:var(--fg);padding:9px 11px;border-radius:8px;font-family:var(--mono);font-size:13px}
+  #login .lerr{color:var(--err);font-size:12px;min-height:14px}
+  #login button{background:var(--accent);color:#000;border:0;padding:9px;border-radius:8px;cursor:pointer;font-weight:700;font-size:14px}
+
+  /* AI log drawer */
+  #ailog{position:fixed;right:0;bottom:0;width:360px;max-height:44%;background:var(--panel);
+    border:1px solid var(--purple);border-right:0;border-bottom:0;border-top-left-radius:10px;
+    display:none;flex-direction:column;box-shadow:0 -6px 30px rgba(0,0,0,.5);z-index:5}
+  #ailog.show{display:flex}
+  #ailog .h{padding:7px 12px;border-bottom:1px solid var(--line);color:var(--purple);font-weight:700;
+    display:flex;align-items:center;gap:8px}
+  #ailog .h .grow{flex:1}
+  #ailog .h span{cursor:pointer;color:var(--dim)}
+  #ailog .list{overflow:auto;padding:4px 0}
+  #ailog .item{padding:5px 12px;border-bottom:1px solid var(--line);font-family:var(--mono);font-size:11px}
+  #ailog .item .t{color:var(--purple)} #ailog .item .d{color:var(--dim)} #ailog .item .ts{color:#586069}
+
+  /* Intercept editor */
+  header input.scope{width:150px}
+  /* Match & Replace modal */
+  #rules{position:fixed;inset:0;background:rgba(2,4,8,.72);display:none;align-items:center;justify-content:center;z-index:20}
+  #rules.show{display:flex}
+  #rules .rbox{width:min(760px,92vw);max-height:80vh;background:var(--panel);border:1px solid var(--line);
+    border-radius:10px;display:flex;flex-direction:column;overflow:hidden}
+  #rules .rhead{display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--line);font-weight:700}
+  #rules .rhead .grow{flex:1} #rules .rhead span{cursor:pointer;color:var(--dim)}
+  #rules .radd{display:flex;gap:6px;padding:10px 14px;border-bottom:1px solid var(--line)}
+  #rules select,#rules input{background:var(--panel2);border:1px solid var(--line);color:var(--fg);
+    padding:5px 8px;border-radius:6px;font-family:var(--mono);font-size:12px}
+  #rules #rpattern,#rules #rreplace{flex:1}
+  #rules .radd button{background:var(--accent);color:#000;border:0;padding:5px 14px;border-radius:6px;cursor:pointer;font-weight:700}
+  #rules .rerr{color:var(--err);font-family:var(--mono);font-size:12px;padding:0 14px}
+  #rules .rerr:empty{display:none} #rules .rerr:not(:empty){padding:6px 14px}
+  #rules .rlist{overflow:auto;padding:6px 0}
+  #rules .ritem{display:flex;align-items:center;gap:10px;padding:6px 14px;border-bottom:1px solid var(--line);font-family:var(--mono);font-size:12px}
+  #rules .ritem .rp{color:var(--info);width:120px} #rules .ritem .rx{flex:1;color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #rules .ritem .rtoggle{cursor:pointer} #rules .ritem .rdel{cursor:pointer;color:var(--err)}
+  #rules .ritem.off{opacity:.45}
+  /* Session (reuses #rules box styling) */
+  #session{position:fixed;inset:0;background:rgba(2,4,8,.72);display:none;align-items:center;justify-content:center;z-index:20}
+  #session.show{display:flex}
+  #session .rbox{width:min(820px,94vw);max-height:86vh;background:var(--panel);border:1px solid var(--line);border-radius:10px;display:flex;flex-direction:column;overflow:hidden}
+  #session .rhead{display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--line);font-weight:700}
+  #session .rhead .grow{flex:1} #session .rhead .ihint{color:var(--dim);font-weight:400;font-size:12px} #session .rhead span[id]{cursor:pointer;color:var(--dim)}
+  #session code{background:var(--panel2);padding:1px 5px;border-radius:4px;color:var(--accent)}
+  #session .ssec{padding:8px 14px 2px;color:var(--accent2);font-weight:700;font-size:12px;font-family:var(--mono)}
+  #session .radd{display:flex;gap:6px;padding:6px 14px}
+  #session input,#session select{background:var(--panel2);border:1px solid var(--line);color:var(--fg);padding:5px 8px;border-radius:6px;font-family:var(--mono);font-size:12px}
+  #session .radd input:not([style*=width]){flex:1}
+  #session .radd button{background:var(--accent);color:#000;border:0;padding:5px 14px;border-radius:6px;cursor:pointer;font-weight:700}
+  #session .rerr{color:var(--err);font-family:var(--mono);font-size:12px;padding:0 14px} #session .rerr:not(:empty){padding:6px 14px}
+  #session .rlist{overflow:auto;padding:4px 0}
+  #session .sitem{display:flex;align-items:center;gap:10px;padding:5px 14px;border-bottom:1px solid var(--line);font-family:var(--mono);font-size:12px}
+  #session .sitem .k{color:var(--info)} #session .sitem .v{flex:1;color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #session .sitem .run{cursor:pointer;color:var(--ok);font-weight:700} #session .sitem .del{cursor:pointer;color:var(--err)}
+  #session .sitem .meta{flex:1;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #btnFindings b, #btnWs b{color:var(--accent2)}
+  #findings .freport{color:var(--info);text-decoration:none;font-weight:400;font-size:12px;margin-right:8px}
+  #findings .freport:hover{text-decoration:underline}
+  #wsmsgs{position:fixed;inset:0;background:rgba(2,4,8,.72);display:none;align-items:center;justify-content:center;z-index:20}
+  #wsmsgs.show{display:flex}
+  #wsmsgs .fbox{width:min(820px,94vw);max-height:82vh;background:var(--panel);border:1px solid var(--line);border-radius:10px;display:flex;flex-direction:column;overflow:hidden}
+  #wsmsgs .rhead{display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--line);font-weight:700}
+  #wsmsgs .rhead .grow{flex:1} #wsmsgs .rhead span[id]{cursor:pointer;color:var(--dim)}
+  #wsmsgs .flist{overflow:auto;padding:4px 0}
+  #wsmsgs .wsi{padding:5px 14px;border-bottom:1px solid var(--line);font-family:var(--mono);font-size:12px;display:flex;gap:8px;align-items:baseline}
+  #wsmsgs .wsi .dir{font-weight:700;width:16px}
+  #wsmsgs .wsi .send{color:var(--info)} #wsmsgs .wsi .recv{color:var(--ok)}
+  #wsmsgs .wsi .k{color:var(--dim);width:56px} #wsmsgs .wsi .h{color:var(--dim)}
+  #wsmsgs .wsi .d{flex:1;color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #wsmsgs .empty2{color:var(--dim);padding:24px;text-align:center;font-style:italic}
+  #sitemap{position:fixed;inset:0;background:rgba(2,4,8,.72);display:none;align-items:center;justify-content:center;z-index:20}
+  #sitemap.show{display:flex}
+  #sitemap .fbox{width:min(820px,94vw);max-height:82vh;background:var(--panel);border:1px solid var(--line);border-radius:10px;display:flex;flex-direction:column;overflow:hidden}
+  #sitemap .rhead{display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--line);font-weight:700}
+  #sitemap .rhead .grow{flex:1} #sitemap .rhead .ihint{color:var(--dim);font-weight:400;font-size:12px} #sitemap .rhead span[id]{cursor:pointer;color:var(--dim)}
+  #sitemap .flist{overflow:auto;padding:4px 0;font-family:var(--mono);font-size:12px}
+  #sitemap .host{padding:6px 12px;color:var(--accent2);font-weight:700;cursor:pointer;border-top:1px solid var(--line)}
+  #sitemap .host .cnt{color:var(--dim);font-weight:400}
+  #sitemap .leaf{padding:3px 12px 3px 30px;cursor:pointer;display:flex;gap:8px;white-space:nowrap;overflow:hidden}
+  #sitemap .leaf:hover{background:#1c2230}
+  #sitemap .leaf .lm{width:52px} #sitemap .leaf .lp{flex:1;overflow:hidden;text-overflow:ellipsis}
+  #sitemap .collapsed .leaf{display:none}
+  #sitemap .empty2{color:var(--dim);padding:24px;text-align:center;font-style:italic}
+  #findings{position:fixed;inset:0;background:rgba(2,4,8,.72);display:none;align-items:center;justify-content:center;z-index:20}
+  #findings.show{display:flex}
+  #findings .fbox{width:min(760px,92vw);max-height:80vh;background:var(--panel);border:1px solid var(--line);
+    border-radius:10px;display:flex;flex-direction:column;overflow:hidden}
+  #findings .rhead{display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--line);font-weight:700}
+  #findings .rhead .grow{flex:1} #findings .rhead span[id]{cursor:pointer;color:var(--dim)}
+  #findings .flist{overflow:auto;padding:4px 0}
+  #findings .fitem{padding:8px 14px;border-bottom:1px solid var(--line);font-size:12px}
+  #findings .fitem .sev{font-family:var(--mono);font-weight:700;font-size:11px;padding:1px 6px;border-radius:4px;margin-right:8px}
+  #findings .sev-high{background:#5b1a1a;color:#ff9a9a} #findings .sev-medium{background:#4d3a10;color:#f0b429}
+  #findings .sev-low{background:#12324a;color:#58a6ff} #findings .sev-info{background:#21262d;color:#8b949e}
+  #findings .fitem .fh{color:var(--dim);font-family:var(--mono)} #findings .fitem .fd{color:var(--dim);margin-top:3px}
+  #findings .empty2{color:var(--dim);padding:24px;text-align:center;font-style:italic}
+  #decoder{position:fixed;inset:0;background:rgba(2,4,8,.72);display:none;align-items:center;justify-content:center;z-index:20}
+  #decoder.show{display:flex}
+  #decoder .dbox{width:min(760px,92vw);background:var(--panel);border:1px solid var(--line);border-radius:10px;display:flex;flex-direction:column}
+  #decoder .rhead{display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--line);font-weight:700}
+  #decoder .rhead .grow{flex:1} #decoder .rhead span[id]{cursor:pointer;color:var(--dim)}
+  #decoder .dbtns{display:flex;flex-wrap:wrap;gap:6px;padding:10px 14px;border-bottom:1px solid var(--line)}
+  #decoder .dbtns button{background:var(--panel2);border:1px solid var(--line);color:var(--fg);padding:4px 10px;border-radius:6px;cursor:pointer;font-size:12px}
+  #decoder .dbtns button:hover{border-color:var(--accent)}
+  #decoder textarea{margin:10px 14px;height:22vh;background:#0a0e14;color:#e6edf3;border:1px solid var(--line);
+    border-radius:6px;padding:10px;font-family:var(--mono);font-size:12px;resize:none;outline:none}
+  #decoder textarea:last-child{margin-top:0}
+  /* Sequencer (reuses decoder box) */
+  #sequencer{position:fixed;inset:0;background:rgba(2,4,8,.72);display:none;align-items:center;justify-content:center;z-index:20}
+  #sequencer.show{display:flex}
+  #sequencer .dbox{width:min(680px,92vw);background:var(--panel);border:1px solid var(--line);border-radius:10px;display:flex;flex-direction:column}
+  #sequencer .rhead{display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--line);font-weight:700}
+  #sequencer .rhead .grow{flex:1} #sequencer .rhead .ihint{color:var(--dim);font-weight:400;font-size:12px}
+  #sequencer .rhead button{background:var(--accent);color:#000;border:0;padding:5px 14px;border-radius:6px;cursor:pointer;font-weight:700}
+  #sequencer .rhead span[id]{cursor:pointer;color:var(--dim)}
+  #sequencer textarea{margin:10px 14px;height:26vh;background:#0a0e14;color:#e6edf3;border:1px solid var(--line);border-radius:6px;padding:10px;font-family:var(--mono);font-size:12px;resize:none;outline:none}
+  #sequencer .seqout{margin:0 14px 14px;font-family:var(--mono);font-size:13px;color:var(--fg)}
+  #sequencer .seqout .verdict{font-weight:700;padding:6px 0}
+  #sequencer .seqout .STRONG{color:var(--ok)} #sequencer .seqout .MODERATE{color:var(--accent2)} #sequencer .seqout .WEAK{color:var(--err)} #sequencer .seqout .INCONCLUSIVE{color:var(--dim)}
+  #sequencer .seqout .row{color:var(--dim)} #sequencer .seqout .row b{color:var(--fg)}
+  /* Comparer */
+  #comparer{position:fixed;inset:0;background:rgba(2,4,8,.72);display:none;align-items:center;justify-content:center;z-index:20}
+  #comparer.show{display:flex}
+  #comparer .cbox{width:min(1000px,96vw);max-height:88vh;background:var(--panel);border:1px solid var(--line);border-radius:10px;display:flex;flex-direction:column;overflow:hidden}
+  #comparer .rhead{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--line);font-weight:700}
+  #comparer .rhead .grow{flex:1} #comparer .rhead .ihint{color:var(--dim);font-weight:400;font-size:12px}
+  #comparer .rhead .cstat{color:var(--accent2);font-family:var(--mono);font-size:12px}
+  #comparer .rhead button{background:var(--accent);color:#000;border:0;padding:5px 14px;border-radius:6px;cursor:pointer;font-weight:700}
+  #comparer .rhead span[id]{cursor:pointer;color:var(--dim)}
+  #comparer .ccols,#comparer .cresult{display:flex;gap:0;padding:0;overflow:auto}
+  #comparer textarea,#comparer .cpane{flex:1;height:64vh;background:#0a0e14;color:#e6edf3;border:1px solid var(--line);padding:10px;font-family:var(--mono);font-size:12px;resize:none;outline:none;white-space:pre;overflow:auto;margin:0}
+  #comparer .cpane .diff{background:#3a1d1d;display:block}
+  #comparer .cpane .same{display:block;opacity:.65}
+  /* Repeater + Intruder share modal styling */
+  #repeater{position:fixed;inset:0;background:rgba(2,4,8,.72);display:none;align-items:center;justify-content:center;z-index:20}
+  #repeater.show{display:flex}
+  #repeater .ibox{width:min(900px,94vw);max-height:88vh;background:var(--panel);border:1px solid var(--line);border-radius:10px;display:flex;flex-direction:column;overflow:hidden}
+  #repeater .rhead{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--line);font-weight:700}
+  #repeater .rhead .grow{flex:1} #repeater .rhead .ihint{color:var(--dim);font-weight:400;font-size:12px}
+  #repeater .rhead button{background:var(--accent);color:#000;border:0;padding:5px 14px;border-radius:6px;cursor:pointer;font-weight:700}
+  #repeater .rhead span[id]{cursor:pointer;color:var(--dim)}
+  #repeater .icols{display:flex;gap:10px;padding:10px 14px}
+  #repeater textarea{flex:1;height:60vh;background:#0a0e14;color:#e6edf3;border:1px solid var(--line);border-radius:6px;padding:10px;font-family:var(--mono);font-size:12px;resize:none;outline:none}
+  /* Intruder */
+  #intruder{position:fixed;inset:0;background:rgba(2,4,8,.72);display:none;align-items:center;justify-content:center;z-index:20}
+  #intruder.show{display:flex}
+  #intruder .ibox{width:min(900px,94vw);max-height:88vh;background:var(--panel);border:1px solid var(--line);border-radius:10px;display:flex;flex-direction:column;overflow:hidden}
+  #intruder .rhead{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--line);font-weight:700}
+  #intruder .rhead .grow{flex:1} #intruder .rhead .ihint{color:var(--dim);font-weight:400;font-size:12px}
+  #intruder .rhead label{color:var(--dim);font-weight:400;font-size:12px}
+  #intruder .rhead input{background:var(--panel2);border:1px solid var(--line);color:var(--fg);width:52px;padding:3px 6px;border-radius:5px;font-family:var(--mono)}
+  #intruder .rhead button{background:var(--accent);color:#000;border:0;padding:5px 14px;border-radius:6px;cursor:pointer;font-weight:700}
+  #intruder .rhead span[id]{cursor:pointer;color:var(--dim)}
+  #intruder .icols{display:flex;gap:10px;padding:10px 14px}
+  #intruder #ireq{flex:2} #intruder #ipayloads{flex:1}
+  #intruder textarea{height:30vh;background:#0a0e14;color:#e6edf3;border:1px solid var(--line);border-radius:6px;padding:10px;font-family:var(--mono);font-size:12px;resize:none;outline:none}
+  #intruder .iresults{overflow:auto;border-top:1px solid var(--line);max-height:34vh}
+  #intruder table{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:12px}
+  #intruder th{position:sticky;top:0;background:var(--panel);color:var(--dim);text-align:left;padding:5px 12px;border-bottom:1px solid var(--line)}
+  #intruder td{padding:4px 12px;border-bottom:1px solid var(--line);white-space:nowrap}
+  #intruder .irow{padding:12px 14px;color:var(--dim)}
+  #btnIntercept.on,#btnInterceptResp.on{background:var(--err);color:#fff;border-color:var(--err);font-weight:700}
+  #intercept{position:fixed;inset:0;background:rgba(2,4,8,.72);display:none;
+    flex-direction:column;align-items:center;justify-content:center;z-index:20;padding:4vh 4vw}
+  #intercept.show{display:flex}
+  #intercept .ihead{width:100%;max-width:1000px;display:flex;align-items:center;gap:12px;
+    background:#1a1206;border:1px solid var(--err);border-bottom:0;border-radius:10px 10px 0 0;padding:10px 14px}
+  #intercept .paused{color:var(--err);font-weight:800;letter-spacing:.4px}
+  #intercept .iq{color:var(--dim);font-family:var(--mono);font-size:12px}
+  #intercept .hint{color:var(--dim);font-size:12px}
+  #intercept .grow{flex:1}
+  #intercept button{border:0;padding:6px 16px;border-radius:6px;cursor:pointer;font-weight:700;font-size:13px;
+    background:var(--ok);color:#04260f}
+  #intercept button.danger{background:var(--err);color:#fff}
+  #intercept textarea{width:100%;max-width:1000px;height:56vh;background:#0a0e14;color:#e6edf3;
+    border:1px solid var(--err);border-radius:0 0 10px 10px;padding:14px;font-family:var(--mono);
+    font-size:13px;line-height:1.55;resize:none;outline:none}
+  /* ---- Annotations (Burp-style comments/highlights) + Writeup ---- */
+  td.col-note{max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--accent);font-size:11px}
+  tr[data-color]{box-shadow:inset 3px 0 0 var(--nc)}
+  tr[data-color="red"]{--nc:#f85149} tr[data-color="orange"]{--nc:#f0883e} tr[data-color="yellow"]{--nc:#d9b02b}
+  tr[data-color="green"]{--nc:#3fb950} tr[data-color="cyan"]{--nc:#39c5cf} tr[data-color="blue"]{--nc:#58a6ff}
+  tr[data-color="pink"]{--nc:#db61a2} tr[data-color="magenta"]{--nc:#bc8cff}
+  .detail-head #btnNote{background:var(--panel2);color:var(--accent)}
+  .detail-head #btnNote.on{background:var(--accent);color:#000}
+  #note{position:fixed;inset:0;background:rgba(2,4,8,.72);display:none;align-items:center;justify-content:center;z-index:24}
+  #note.show{display:flex}
+  #note .nbox{width:min(560px,92vw);background:var(--panel);border:1px solid var(--line);border-radius:10px;display:flex;flex-direction:column;overflow:hidden}
+  #note .rhead{display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--line);font-weight:700}
+  #note .rhead .grow{flex:1} #note .rhead span.x{cursor:pointer;color:var(--dim)}
+  #note .nbody{padding:12px 14px;display:flex;flex-direction:column;gap:9px}
+  #note label{font-size:11px;color:var(--dim);display:flex;flex-direction:column;gap:3px}
+  #note input,#note textarea{background:var(--panel2);border:1px solid var(--line);color:var(--fg);
+    padding:6px 9px;border-radius:6px;font-family:var(--mono);font-size:12px;outline:none}
+  #note textarea{resize:vertical;min-height:52px}
+  #note .nrow{display:flex;gap:9px} #note .nrow label{flex:1}
+  #note .swatches{display:flex;gap:6px;padding-top:2px}
+  #note .sw{width:20px;height:20px;border-radius:5px;cursor:pointer;border:2px solid transparent}
+  #note .sw.sel{border-color:#fff}
+  #note .nfoot{display:flex;gap:8px;padding:10px 14px;border-top:1px solid var(--line)}
+  #note .nfoot .grow{flex:1}
+  #note .nfoot button{border:0;padding:6px 16px;border-radius:6px;cursor:pointer;font-weight:700}
+  #note #nsave{background:var(--accent);color:#000} #note #ndel{background:var(--panel2);color:var(--err)}
+  #writeup{position:fixed;inset:0;background:rgba(2,4,8,.72);display:none;align-items:center;justify-content:center;z-index:24}
+  #writeup.show{display:flex}
+  #writeup .wbox{width:min(920px,95vw);max-height:88vh;background:var(--panel);border:1px solid var(--line);border-radius:10px;display:flex;flex-direction:column;overflow:hidden}
+  #writeup .rhead{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--line);font-weight:700}
+  #writeup .rhead .grow{flex:1} #writeup .rhead span.x{cursor:pointer;color:var(--dim)}
+  #writeup .wtools{display:flex;align-items:center;gap:10px;padding:8px 14px;border-bottom:1px solid var(--line);font-size:12px;color:var(--dim)}
+  #writeup .wtools input{width:200px;background:var(--panel2);border:1px solid var(--line);color:var(--fg);padding:5px 8px;border-radius:6px;font-family:var(--mono);font-size:12px}
+  #writeup .wtools button{background:var(--accent);color:#000;border:0;padding:5px 12px;border-radius:6px;cursor:pointer;font-weight:700}
+  #writeup .wtools label{display:flex;align-items:center;gap:5px;cursor:pointer}
+  #writeup pre{margin:0;overflow:auto;padding:14px;font-family:var(--mono);font-size:12px;line-height:1.55;color:#c9d1d9;white-space:pre-wrap;word-break:break-word}
+</style>
+</head>
+<body>
+<header>
+  <span class="dot" id="dot"></span>
+  <span class="logo">🪤 BogBogProx <small>· Live</small></span>
+  <span class="stat"><b id="count">0</b> flows</span>
+  <span class="ops" id="ops" title="operators online"></span>
+  <button id="btnLogout" style="display:none" title="End this team session">Logout</button>
+  <span class="grow"></span>
+  <input type="text" id="filter" placeholder="filter — e.g. status:4 host:api !mime:json" autocomplete="off" title="HTTPQL: field:value (status/host/path/method/mime/source), ! negates, space = AND">
+  <input type="text" id="scope" class="scope" placeholder="scope: host,host…" title="Limit intercept to these hosts (comma-separated; empty = all)" autocomplete="off">
+  <button id="btnIntercept" title="Hold requests at a breakpoint to edit/drop them">⏸ Req: off</button>
+  <button id="btnInterceptResp" title="Also hold responses">⏸ Resp: off</button>
+  <button id="btnRules" title="Match &amp; Replace rules">⚙ M&amp;R</button>
+  <button id="btnSession" title="Session handling — variables &amp; macros">🔑 Session</button>
+  <button id="btnFindings" title="Passive scan findings">⚠ Findings <b id="findCount"></b></button>
+  <button id="btnMap" title="Sitemap — captured hosts &amp; paths">🗺 Sitemap</button>
+  <button id="btnWs" title="Captured WebSocket messages">🔌 WS <b id="wsCount"></b></button>
+  <button id="btnCompare" title="Compare two requests/responses">⚖ Compare</button>
+  <button id="btnSeq" title="Sequencer — token randomness">🎲 Seq</button>
+  <button id="btnDecoder" title="Encode / decode">🔧 Decoder</button>
+  <button id="btnWriteup" title="Curate annotated flows into a paste-ready writeup">📝 Writeup</button>
+  <button id="btnBrowser" title="Open a throwaway browser wired to the proxy">🌐 Browser</button>
+  <button id="btnNotify" title="Desktop popups when the AI acts">🔔 Popups: off</button>
+  <button id="btnAuto" class="active" title="Auto-scroll to newest">⤓ Auto</button>
+  <button id="btnClear" title="Clear the view (does not delete stored flows)">Clear</button>
+</header>
+
+<div id="ai">
+  <span class="bot">🤖</span>
+  <span><span class="who" id="aiWho">AI</span> <span class="what" id="aiWhat"></span> <span class="detail" id="aiDetail"></span></span>
+  <span class="ago" id="aiAgo"></span>
+</div>
+
+<main>
+  <div class="col-flows">
+    <div class="scroll">
+      <table>
+        <thead><tr>
+          <th class="col-num">#</th><th>M</th><th>St</th><th>Host / Path</th>
+          <th title="writeup comment">💬</th>
+          <th>Type</th><th class="col-sz">Size</th><th class="col-ms">ms</th><th class="col-time">Time</th>
+        </tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+  </div>
+  <div class="col-detail">
+    <div class="detail-head" id="dHead"><span class="empty" style="padding:0">select a flow →</span></div>
+    <div class="tabs" id="dTabs" style="display:none">
+      <button data-t="req" class="active">Request</button>
+      <button data-t="res">Response</button>
+    </div>
+    <pre class="body" id="dBody"></pre>
+  </div>
+</main>
+
+<div id="login">
+  <div class="lbox">
+    <div class="lh">🪤 BogBogProx — join engagement</div>
+    <p class="lp">This is a team server. Enter the project token to join.</p>
+    <input type="password" id="ltoken" placeholder="project token" autocomplete="off">
+    <input type="text" id="lname" placeholder="your name" autocomplete="off">
+    <div class="lerr" id="lerr"></div>
+    <button id="lbtn">Join</button>
+  </div>
+</div>
+
+<div id="ailog">
+  <div class="h"><span>🤖</span> AI activity <span class="grow"></span><span id="ailogClose">✕</span></div>
+  <div class="list" id="ailogList"></div>
+</div>
+
+<div id="repeater">
+  <div class="ibox">
+    <div class="rhead">✎ Repeater <span class="ihint">edit the request and send</span>
+      <span class="grow"></span><button id="rpsend">Send ▶</button><span id="rpClose">✕</span></div>
+    <div class="icols">
+      <textarea id="rpreq" spellcheck="false" placeholder="request"></textarea>
+      <textarea id="rpresp" spellcheck="false" readonly placeholder="response"></textarea>
+    </div>
+  </div>
+</div>
+
+<div id="intruder">
+  <div class="ibox">
+    <div class="rhead">⚔ Intruder <span class="ihint">insert § in the request where each payload goes</span>
+      <span class="grow"></span>
+      <label>marker <input id="imarker" value="§"></label>
+      <label>threads <input id="iconc" value="10"></label>
+      <button id="irun">Run ▶</button><span id="intruderClose">✕</span></div>
+    <div class="icols">
+      <textarea id="ireq" spellcheck="false" placeholder="request template"></textarea>
+      <textarea id="ipayloads" spellcheck="false" placeholder="payloads — one per line"></textarea>
+    </div>
+    <div class="iresults" id="iresults"></div>
+  </div>
+</div>
+
+<div id="sitemap">
+  <div class="fbox">
+    <div class="rhead">🗺 Sitemap <span class="ihint">captured hosts &amp; paths — click to open</span>
+      <span class="grow"></span><span id="mapRefresh" title="rebuild" style="margin-right:10px">refresh</span><span id="mapClose">✕</span></div>
+    <div class="flist" id="maplist"></div>
+  </div>
+</div>
+
+<div id="wsmsgs">
+  <div class="fbox">
+    <div class="rhead">🔌 WebSocket messages <span class="grow"></span>
+      <span id="wsClear" title="clear" style="margin-right:10px">clear</span><span id="wsClose">✕</span></div>
+    <div class="flist" id="wslist"></div>
+  </div>
+</div>
+
+<div id="comparer">
+  <div class="cbox">
+    <div class="rhead">⚖ Comparer <span class="ihint">paste or send two items, then Compare (differing lines highlight)</span>
+      <span class="grow"></span><span id="cdiff" class="cstat"></span><button id="cbtn">Compare</button><span id="compClose">✕</span></div>
+    <div class="ccols" id="cedit">
+      <textarea id="ca" spellcheck="false" placeholder="A"></textarea>
+      <textarea id="cb" spellcheck="false" placeholder="B"></textarea>
+    </div>
+    <div class="cresult" id="cresult" style="display:none"></div>
+  </div>
+</div>
+
+<div id="sequencer">
+  <div class="dbox">
+    <div class="rhead">🎲 Sequencer <span class="ihint">paste tokens (one per line) — analyse randomness</span>
+      <span class="grow"></span><button id="seqrun">Analyse</button><span id="seqClose">✕</span></div>
+    <textarea id="seqin" spellcheck="false" placeholder="token per line"></textarea>
+    <div id="seqout" class="seqout"></div>
+  </div>
+</div>
+
+<div id="decoder">
+  <div class="dbox">
+    <div class="rhead">🔧 Decoder / Encoder <span class="grow"></span><span id="decClose">✕</span></div>
+    <div class="dbtns">
+      <button data-op="b64e">Base64 ▸</button><button data-op="b64d">◂ Base64</button>
+      <button data-op="urle">URL ▸</button><button data-op="urld">◂ URL</button>
+      <button data-op="hexe">Hex ▸</button><button data-op="hexd">◂ Hex</button>
+      <button data-op="jwt">JWT decode</button>
+    </div>
+    <textarea id="decIn" placeholder="input" spellcheck="false"></textarea>
+    <textarea id="decOut" placeholder="output" spellcheck="false" readonly></textarea>
+  </div>
+</div>
+
+<div id="note">
+  <div class="nbox">
+    <div class="rhead">📝 Annotate flow <span id="nFlow" style="color:var(--accent)"></span><span class="grow"></span><span class="x" id="noteClose">✕</span></div>
+    <div class="nbody">
+      <label>Label (writeup section heading)
+        <input type="text" id="nlabel" placeholder="e.g. Sandbox escape" spellcheck="false"></label>
+      <label>Note (why this step matters)
+        <textarea id="nnote" placeholder="prose shown above the transcript"></textarea></label>
+      <div class="nrow">
+        <label>Step (order)<input type="number" id="nstep" min="1" placeholder="1"></label>
+        <label>Highlight payload<input type="text" id="nhl" placeholder="substring to spotlight" spellcheck="false"></label>
+      </div>
+      <label>Highlight colour
+        <div class="swatches" id="nswatches">
+          <div class="sw" data-c="" style="background:#30363d" title="none"></div>
+          <div class="sw" data-c="red" style="background:#f85149"></div>
+          <div class="sw" data-c="orange" style="background:#f0883e"></div>
+          <div class="sw" data-c="yellow" style="background:#d9b02b"></div>
+          <div class="sw" data-c="green" style="background:#3fb950"></div>
+          <div class="sw" data-c="cyan" style="background:#39c5cf"></div>
+          <div class="sw" data-c="blue" style="background:#58a6ff"></div>
+          <div class="sw" data-c="pink" style="background:#db61a2"></div>
+        </div></label>
+      <label style="flex-direction:row;align-items:center;gap:7px"><input type="checkbox" id="ninclude" checked style="width:auto"> include in writeup</label>
+    </div>
+    <div class="nfoot"><button id="ndel">Remove</button><span class="grow"></span><button id="nsave">Save</button></div>
+  </div>
+</div>
+
+<div id="writeup">
+  <div class="wbox">
+    <div class="rhead">📝 Engagement writeup <span class="grow"></span><span class="x" id="wuClose">✕</span></div>
+    <div class="wtools">
+      <span>highlight:</span><input type="text" id="wuHl" placeholder="global payload (optional)" spellcheck="false">
+      <label><input type="checkbox" id="wuRedact" checked> redact secrets</label>
+      <button id="wuRefresh">↻ Refresh</button>
+      <span class="grow"></span>
+      <button id="wuCopy">⧉ Copy Markdown</button>
+    </div>
+    <pre id="wuBody">annotate flows (📝 in the detail pane), then open this panel…</pre>
+  </div>
+</div>
+
+<div id="findings">
+  <div class="fbox">
+    <div class="rhead">⚠ Passive scan findings <span class="grow"></span>
+      <a href="/api/v1/report?format=md" target="_blank" class="freport" title="Markdown report">report ↗</a>
+      <a href="/api/v1/report?format=sarif" class="freport" title="SARIF export">SARIF ↓</a>
+      <span id="findClear" title="clear" style="margin-right:10px">clear</span><span id="findClose">✕</span></div>
+    <div class="flist" id="flist"></div>
+  </div>
+</div>
+
+<div id="session">
+  <div class="rbox">
+    <div class="rhead">🔑 Session handling <span class="ihint">run a macro to fetch a token → inject it with M&amp;R as <code>{{var}}</code></span>
+      <span class="grow"></span><span id="sessClose">✕</span></div>
+    <div class="ssec">Variables</div>
+    <div class="radd">
+      <input type="text" id="vname" placeholder="name" style="width:120px">
+      <input type="text" id="vval" placeholder="value">
+      <button id="vaddbtn">Set</button>
+    </div>
+    <div class="rlist" id="vlist" style="max-height:22vh"></div>
+    <div class="ssec">Macros <span class="ihint">run to refresh a variable</span></div>
+    <div class="radd" style="flex-wrap:wrap">
+      <input type="text" id="mname" placeholder="name" style="width:80px">
+      <select id="mmethod"><option>GET</option><option>POST</option><option>PUT</option></select>
+      <input type="text" id="murl" placeholder="url" style="min-width:160px">
+      <input type="text" id="mextract" placeholder="extract regex (group 1)" style="min-width:140px">
+      <input type="text" id="mvar" placeholder="→ var" style="width:72px">
+      <button id="maddbtn">Add</button>
+    </div>
+    <div class="rerr" id="serr"></div>
+    <div class="rlist" id="mlist" style="max-height:24vh"></div>
+  </div>
+</div>
+
+<div id="rules">
+  <div class="rbox">
+    <div class="rhead">⚙ Match &amp; Replace <span class="grow"></span><span id="rulesClose">✕</span></div>
+    <div class="radd">
+      <select id="rpart">
+        <option value="request_url">req url</option>
+        <option value="request_header">req header</option>
+        <option value="request_body">req body</option>
+        <option value="response_header">resp header</option>
+        <option value="response_body">resp body</option>
+      </select>
+      <input type="text" id="rpattern" placeholder="regex pattern">
+      <input type="text" id="rreplace" placeholder="replacement ($1 ok)">
+      <button id="raddbtn">Add</button>
+    </div>
+    <div class="rerr" id="rerr"></div>
+    <div class="rlist" id="rlist"></div>
+  </div>
+</div>
+
+<div id="intercept">
+  <div class="ihead">
+    <span class="paused" id="ipaused">⏸ REQUEST HELD</span>
+    <span class="iq" id="iqueue"></span>
+    <span class="grow"></span>
+    <span class="hint">edit the raw request below, then</span>
+    <button id="iforward" title="Send it (with your edits)">Forward ▶</button>
+    <button id="idrop" class="danger" title="Drop it — client gets 403">Drop ✕</button>
+  </div>
+  <textarea id="iedit" spellcheck="false" autocomplete="off"></textarea>
+</div>
+
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const rows = $('rows'), countEl = $('count'), dot = $('dot');
+
+  // ---------- Auth (team mode) ----------
+  let authToken = localStorage.getItem('bogbogprox_token') || null;
+  const _fetch = window.fetch.bind(window);
+  // Inject the session token on same-origin /api/ calls (EventSource handled separately).
+  window.fetch = (url, opts) => {
+    opts = opts || {};
+    if(authToken && typeof url === 'string' && url.startsWith('/api/')){
+      opts.headers = Object.assign({}, opts.headers, { 'Authorization': 'Bearer ' + authToken });
+    }
+    return _fetch(url, opts);
+  };
+
+  const state = { flows: new Map(), order: [], sel: null, detail: null, tab: 'req',
+                  auto: true, notify: false, query: [], intercept: false, interceptResp: false, held: [], findings: [], ws: [],
+                  annotations: new Map() };
+
+  // ---------- helpers ----------
+  const esc = s => (s==null?'':String(s)).replace(/[&<>"']/g, c => ({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+  }[c]));
+  const hhmmss = ts => { const d=new Date(ts); const p=n=>String(n).padStart(2,'0');
+    return p(d.getHours())+':'+p(d.getMinutes())+':'+p(d.getSeconds()); };
+  const sizeFmt = n => n==null?'':(n<1024?n+'B':n<1048576?(n/1024).toFixed(1)+'K':(n/1048576).toFixed(1)+'M');
+  const b64dec = b64 => { try{ const bin=atob(b64||''); const u=new Uint8Array(bin.length);
+    for(let i=0;i<bin.length;i++)u[i]=bin.charCodeAt(i);
+    try{return new TextDecoder('utf-8',{fatal:false}).decode(u);}catch(e){return bin;} }catch(e){return '';} };
+
+  // ---------- flow rendering ----------
+  // Mini HTTPQL: space-separated terms (all must match). `field:value`
+  // (status/host/path/method/mime/source) or a bare word (whole-row). Prefix `!`
+  // negates. e.g. `status:4 host:api !mime:json`
+  function parseQuery(q){
+    return q.trim().split(/\s+/).filter(Boolean).map(term => {
+      let neg = false;
+      if(term[0]==='!'){ neg = true; term = term.slice(1); }
+      const ci = term.indexOf(':');
+      return ci>0 ? {neg, field:term.slice(0,ci).toLowerCase(), val:term.slice(ci+1).toLowerCase()}
+                  : {neg, field:'*', val:term.toLowerCase()};
+    });
+  }
+  function matchTerm(f, t){
+    let hay;
+    switch(t.field){
+      case 'status': hay = String(f.status||''); break;
+      case 'host': hay = (f.host||'').toLowerCase(); break;
+      case 'path': hay = (f.path||'').toLowerCase(); break;
+      case 'method': hay = (f.method||'').toLowerCase(); break;
+      case 'mime': case 'type': hay = (f.mime||'').toLowerCase(); break;
+      case 'source': case 'src': hay = (f.source||'').toLowerCase(); break;
+      default: hay = (f.method+' '+f.host+f.path+' '+(f.status||'')+' '+(f.mime||'')).toLowerCase();
+    }
+    const ok = hay.includes(t.val);
+    return t.neg ? !ok : ok;
+  }
+  function matches(f){
+    if(!state.query || !state.query.length) return true;
+    return state.query.every(t => matchTerm(f, t));
+  }
+
+  function rowHtml(f){
+    const sc = f.status ? 's'+String(f.status)[0] : 's0';
+    const type = (f.mime||'').replace('application/','').replace('text/','');
+    const rep = f.source==='repeater' ? '<span class="rep" title="repeater">↻</span>' : '';
+    const ann = state.annotations.get(f.id);
+    const comment = ann && ann.label ? esc(ann.label) : (ann && ann.note ? esc(ann.note) : '');
+    return `<td class="col-num">${rep}${f.id}</td>`+
+      `<td class="m m-${esc(f.method)}">${esc(f.method)}</td>`+
+      `<td class="${sc}">${f.status||'·'}</td>`+
+      `<td><span class="host">${esc(f.host)}</span><span class="url">${esc(f.path)}</span></td>`+
+      `<td class="col-note" title="${comment}">${comment}</td>`+
+      `<td class="host">${esc(type)}</td>`+
+      `<td class="col-sz">${sizeFmt(f.resp_size)}</td>`+
+      `<td class="col-ms">${f.duration_ms??''}</td>`+
+      `<td class="col-time">${hhmmss(f.ts)}</td>`;
+  }
+
+  function applyRowColor(tr, id){
+    const ann = state.annotations.get(id);
+    if(ann && ann.color) tr.dataset.color = ann.color; else tr.removeAttribute('data-color');
+  }
+
+  function upsert(f, fresh){
+    let tr = state.flows.get(f.id)?.el;
+    if(!tr){
+      tr = document.createElement('tr');
+      tr.dataset.id = f.id;
+      tr.onclick = () => select(f.id);
+      state.order.push(f.id);
+      if(state.auto) rows.prepend(tr); else rows.appendChild(tr);
+    }
+    tr.innerHTML = rowHtml(f);
+    applyRowColor(tr, f.id);
+    tr.style.display = matches(f) ? '' : 'none';
+    if(state.sel === f.id) tr.classList.add('sel');
+    if(fresh){ tr.classList.remove('fresh'); void tr.offsetWidth; tr.classList.add('fresh'); }
+    state.flows.set(f.id, { f, el: tr });
+    countEl.textContent = state.flows.size;
+  }
+
+  async function select(id){
+    state.sel = id;
+    document.querySelectorAll('tr.sel').forEach(t=>t.classList.remove('sel'));
+    const rec = state.flows.get(id); if(rec) rec.el.classList.add('sel');
+    $('dTabs').style.display = 'flex';
+    $('dHead').innerHTML = '<span class="kv">loading…</span>';
+    try{
+      const r = await fetch('/api/v1/flows/'+id); state.detail = await r.json();
+      const f = state.detail;
+      const url = f.request.url ? f.request.url : (f.request.scheme+'://'+f.request.host+f.request.path);
+      $('dHead').innerHTML = `<button id="resend" title="Resend as-is (Repeater)">↻ Resend</button>`+
+        `<button id="editrep" title="Edit &amp; send (Repeater)">✎ Edit</button>`+
+        `<button id="tointruder" title="Send to Intruder (fuzz)">⚔ Intruder</button>`+
+        `<button id="activescan" title="Active scan query params (XSS/SQLi)">🛡 Scan</button>`+
+        `<button id="btnNote" title="Annotate for the writeup (comment / highlight)">📝 Note</button>`+
+        `<span class="m m-${esc(f.request.method)}">${esc(f.request.method)}</span> `+
+        `<span class="url">${esc(url)}</span>`;
+      $('resend').onclick = () => resend(id);
+      $('editrep').onclick = () => openRepeater();
+      $('tointruder').onclick = () => openIntruder();
+      $('activescan').onclick = () => activeScan(id);
+      const nb=$('btnNote'); if(state.annotations.has(id)) nb.classList.add('on');
+      nb.onclick = () => openNote(id);
+      renderDetail();
+    }catch(e){ $('dHead').innerHTML='<span class="s5">failed to load</span>'; }
+  }
+
+  async function resend(id){
+    const btn=$('resend'); if(btn){ btn.disabled=true; btn.textContent='↻ sending…'; }
+    try{
+      const r = await fetch('/api/v1/repeater/from/'+id, {method:'POST'});
+      const f = await r.json();
+      if(f && f.id){ select(f.id); } // the new repeater flow also streams in via SSE
+    }catch(e){}
+    if(btn){ btn.disabled=false; btn.textContent='↻ Resend'; }
+  }
+
+  function headerBlock(hs){ return (hs||[]).map(([k,v])=>`<span class="kv"><b>${esc(k)}</b>: ${esc(v)}</span>`).join('\n'); }
+
+  function detectGraphQL(rq){
+    const body = b64dec(rq.body||'');
+    try{
+      const j = JSON.parse(body);
+      if(j && typeof j.query === 'string')
+        return { op:j.operationName||'', query:j.query, vars:j.variables?JSON.stringify(j.variables,null,2):'' };
+    }catch(e){}
+    if((rq.path||'').toLowerCase().includes('graphql') && body.trim())
+      return { op:'', query:body, vars:'' };
+    return null;
+  }
+  function renderDetail(){
+    const f = state.detail; if(!f) return;
+    if(state.tab==='req'){
+      const rq=f.request;
+      const line = `${rq.method} ${rq.path}${rq.query?('?'+rq.query):''} ${rq.http_version}`;
+      let html = (rq.body_truncated ? '<span class="s4">[body capture truncated; wire traffic was complete]</span>\n' : '')+
+        esc(line)+'\n'+headerBlock(rq.headers)+'\n\n'+esc(b64dec(rq.body));
+      const gql = detectGraphQL(rq);
+      if(gql){
+        html = `<span class="gql">╭─ GraphQL${gql.op?(' · '+esc(gql.op)):''} ─╮</span>\n`+
+          `<span class="gqlq">${esc(gql.query)}</span>\n`+
+          (gql.vars?`<span class="gql">variables:</span>\n${esc(gql.vars)}\n`:'')+
+          `<span class="gql">╰────────────╯</span>\n\n`+html;
+      }
+      $('dBody').innerHTML = html;
+    } else {
+      const rs=f.response;
+      if(!rs){ $('dBody').innerHTML='<span class="kv">no response captured</span>'; return; }
+      const line = `${rs.http_version} ${rs.status}`;
+      $('dBody').innerHTML = (rs.body_truncated ? '<span class="s4">[body capture truncated; wire traffic was complete]</span>\n' : '')+
+        esc(line)+'\n'+headerBlock(rs.headers)+'\n\n'+esc(b64dec(rs.body));
+    }
+  }
+
+  // ---------- Annotations (writeup curation) ----------
+  async function loadAnnotations(){
+    try{
+      const list = await (await fetch('/api/v1/annotations')).json();
+      state.annotations = new Map(list.map(a => [a.flow_id, a]));
+    }catch(e){ return; }
+    // re-render comment + colour on every visible row
+    state.flows.forEach(({f, el}, id) => { el.innerHTML = rowHtml(f); applyRowColor(el, id); if(state.sel===id) el.classList.add('sel'); });
+  }
+
+  let noteId = null, noteColor = '';
+  function openNote(id){
+    noteId = id;
+    const a = state.annotations.get(id) || {};
+    $('nFlow').textContent = '#'+id;
+    $('nlabel').value = a.label || '';
+    $('nnote').value  = a.note  || '';
+    $('nstep').value  = a.step!=null ? a.step : '';
+    $('nhl').value    = a.highlight || '';
+    $('ninclude').checked = a.include!==false;
+    noteColor = a.color || '';
+    document.querySelectorAll('#nswatches .sw').forEach(s => s.classList.toggle('sel', (s.dataset.c||'')===noteColor));
+    $('note').classList.add('show');
+    $('nlabel').focus();
+  }
+  async function saveNote(){
+    if(noteId==null) return;
+    const patch = {
+      label: $('nlabel').value,
+      note:  $('nnote').value,
+      highlight: $('nhl').value,
+      color: noteColor,
+      include: $('ninclude').checked,
+    };
+    const st = $('nstep').value.trim();
+    if(st!=='') patch.step = parseInt(st, 10);
+    await fetch('/api/v1/flows/'+noteId+'/note', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(patch)});
+    $('note').classList.remove('show');
+    // SSE config_changed will refresh, but update eagerly for snappiness
+    await loadAnnotations();
+    if(state.sel===noteId){ const nb=$('btnNote'); if(nb) nb.classList.toggle('on', state.annotations.has(noteId)); }
+  }
+  async function removeNote(){
+    if(noteId==null) return;
+    await fetch('/api/v1/flows/'+noteId+'/note', {method:'DELETE'});
+    $('note').classList.remove('show');
+    await loadAnnotations();
+    if(state.sel===noteId){ const nb=$('btnNote'); if(nb) nb.classList.remove('on'); }
+  }
+
+  // ---------- Writeup panel ----------
+  async function loadWriteup(){
+    const q = new URLSearchParams({ format:'writeup' });
+    const hl = $('wuHl').value.trim(); if(hl) q.set('highlight', hl);
+    if(!$('wuRedact').checked) q.set('redact', 'false');
+    $('wuBody').textContent = 'rendering…';
+    try{
+      const md = await (await fetch('/api/v1/report?'+q.toString())).text();
+      $('wuBody').textContent = md;
+    }catch(e){ $('wuBody').textContent = 'error: '+e.message; }
+  }
+  async function copyWriteup(){
+    try{ await navigator.clipboard.writeText($('wuBody').textContent);
+      const b=$('wuCopy'); const t=b.textContent; b.textContent='✓ Copied'; setTimeout(()=>b.textContent=t,1200);
+    }catch(e){}
+  }
+
+  // ---------- AI activity ----------
+  const aiEl=$('ai'); let aiLast=0;
+  function onActivity(a){
+    aiLast = a.ts || Date.now();
+    $('aiWho').textContent = a.agent || 'AI';
+    const label = a.tool==='connect' ? 'connected' : ('→ '+a.tool);
+    $('aiWhat').textContent = label;
+    $('aiDetail').textContent = a.detail ? ('· '+a.detail) : '';
+    aiEl.classList.add('show'); aiEl.classList.remove('flash'); void aiEl.offsetWidth; aiEl.classList.add('flash');
+    // log drawer
+    const log=$('ailogList'); const it=document.createElement('div'); it.className='item';
+    it.innerHTML=`<span class="ts">${hhmmss(aiLast)}</span> <span class="t">${esc(a.tool)}</span> <span class="d">${esc(a.detail||'')}</span>`;
+    log.prepend(it); while(log.children.length>200) log.removeChild(log.lastChild);
+    $('ailog').classList.add('show');
+    // desktop popup
+    if(state.notify && 'Notification' in window && Notification.permission==='granted'){
+      try{ new Notification('🤖 '+(a.agent||'AI')+' · '+a.tool, { body:a.detail||'', tag:'bogbogprox-ai', silent:false }); }catch(e){}
+    }
+    document.title = '🤖 '+a.tool+' · BogBogProx';
+  }
+  setInterval(()=>{ if(aiLast){ const s=Math.round((Date.now()-aiLast)/1000);
+    $('aiAgo').textContent = s<2?'now':s<60?s+'s ago':Math.round(s/60)+'m ago';
+    if(s>8) document.title='🪤 BogBogProx — Live'; } }, 1000);
+
+  // ---------- Intercept ----------
+  function reqToText(r){
+    const target = r.path + (r.query ? '?'+r.query : '');
+    let s = `${r.method} ${target} ${r.http_version||'HTTP/1.1'}\n`;
+    for(const [k,v] of (r.headers||[])) s += `${k}: ${v}\n`;
+    return s + '\n' + b64dec(r.body||'');
+  }
+  function textToReq(t){
+    const nl = t.indexOf('\n\n');
+    const head = nl>=0 ? t.slice(0,nl) : t;
+    const body = nl>=0 ? t.slice(nl+2) : '';
+    const lines = head.split('\n');
+    const first = (lines.shift()||'').trim().split(/\s+/);
+    const target = first[1] || '/';
+    const qi = target.indexOf('?');
+    const headers = [];
+    for(const ln of lines){ const c = ln.indexOf(':'); if(c>0) headers.push([ln.slice(0,c).trim(), ln.slice(c+1).trim()]); }
+    return { method: first[0]||'GET',
+             path: qi>=0 ? target.slice(0,qi) : target,
+             query: qi>=0 ? target.slice(qi+1) : null,
+             headers, body };
+  }
+  function respToText(r){
+    let s = `${r.http_version||'HTTP/1.1'} ${r.status}\n`;
+    for(const [k,v] of (r.headers||[])) s += `${k}: ${v}\n`;
+    return s + '\n' + b64dec(r.body||'');
+  }
+  function textToResp(t){
+    const nl = t.indexOf('\n\n');
+    const head = nl>=0 ? t.slice(0,nl) : t;
+    const body = nl>=0 ? t.slice(nl+2) : '';
+    const lines = head.split('\n');
+    const first = (lines.shift()||'').trim().split(/\s+/);
+    const headers = [];
+    for(const ln of lines){ const c = ln.indexOf(':'); if(c>0) headers.push([ln.slice(0,c).trim(), ln.slice(c+1).trim()]); }
+    return { status: parseInt(first[1]||first[0])||200, headers, body };
+  }
+  function renderIntercept(){
+    const p = $('intercept');
+    if(state.held.length === 0){ p.classList.remove('show'); return; }
+    const item = state.held[0];
+    if(p.dataset.id !== String(item.id)){       // refill only on a new held item
+      p.dataset.id = String(item.id);
+      $('iedit').value = item.kind==='resp' ? respToText(item.data) : reqToText(item.data);
+    }
+    $('ipaused').textContent = item.kind==='resp' ? '⏸ RESPONSE HELD' : '⏸ REQUEST HELD';
+    $('iqueue').textContent = state.held.length>1 ? `(+${state.held.length-1} more queued)` : '';
+    p.classList.add('show');
+    $('iedit').focus();
+  }
+  async function iresolve(action){
+    const item = state.held[0]; if(!item) return;
+    $('intercept').dataset.id = '';             // force refill for the next one
+    state.held = state.held.filter(h => h.id !== item.id);
+    renderIntercept();
+    const base = `/api/v1/intercept/${item.id}`;
+    if(action==='drop'){
+      await fetch(item.kind==='resp' ? `${base}/drop-response` : `${base}/drop`, {method:'POST'});
+    } else if(item.kind==='resp'){
+      await fetch(`${base}/forward-response`, {method:'POST',
+        headers:{'Content-Type':'application/json'}, body: JSON.stringify(textToResp($('iedit').value))});
+    } else {
+      await fetch(`${base}/forward`, {method:'POST',
+        headers:{'Content-Type':'application/json'}, body: JSON.stringify(textToReq($('iedit').value))});
+    }
+  }
+  async function postToggle(b){
+    await fetch('/api/v1/intercept',
+      {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(b)});
+  }
+  function setInterceptState(on, responses){
+    state.intercept = on; state.interceptResp = responses;
+    const b = $('btnIntercept'); b.textContent = on ? '⏸ Req: ON' : '⏸ Req: off'; b.classList.toggle('on', on);
+    const r = $('btnInterceptResp'); r.textContent = responses ? '⏸ Resp: ON' : '⏸ Resp: off'; r.classList.toggle('on', responses);
+  }
+
+  // ---------- Session handling ----------
+  async function loadVars(){
+    try{
+      const v = await (await fetch('/api/v1/vars')).json();
+      const el = $('vlist'); const keys = Object.keys(v);
+      el.innerHTML = keys.length ? '' : '<div class="sitem" style="opacity:.5">no variables</div>';
+      for(const k of keys){
+        const d = document.createElement('div'); d.className = 'sitem';
+        d.innerHTML = `<span class="k">${esc(k)}</span> = <span class="v">${esc(v[k])}</span><span class="del" title="delete">🗑</span>`;
+        d.querySelector('.del').onclick = async () => { await fetch('/api/v1/vars/'+encodeURIComponent(k),{method:'DELETE'}); loadVars(); };
+        el.appendChild(d);
+      }
+    }catch(e){}
+  }
+  async function setVar(){
+    const name = $('vname').value.trim(); if(!name) return;
+    await fetch('/api/v1/vars',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,value:$('vval').value})});
+    $('vname').value=''; $('vval').value=''; loadVars();
+  }
+  async function loadMacros(){
+    try{
+      const list = await (await fetch('/api/v1/macros')).json();
+      const el = $('mlist');
+      el.innerHTML = list.length ? '' : '<div class="sitem" style="opacity:.5">no macros</div>';
+      for(const m of list){
+        const d = document.createElement('div'); d.className = 'sitem';
+        d.innerHTML = `<span class="k">${esc(m.name||'macro')}</span>`+
+          `<span class="meta">${esc(m.method)} ${esc(m.url)} → <b>${esc(m.var)}</b></span>`+
+          `<span class="run" title="run">▶ run</span><span class="del" title="delete">🗑</span>`;
+        d.querySelector('.run').onclick = async (ev) => {
+          ev.target.textContent = '…';
+          const r = await (await fetch(`/api/v1/macros/${m.id}/run`,{method:'POST'})).json();
+          ev.target.textContent = r.ok ? ('✓ '+r.var) : '✗';
+          loadVars(); setTimeout(()=>{ev.target.textContent='▶ run';}, 2000);
+        };
+        d.querySelector('.del').onclick = async () => { await fetch(`/api/v1/macros/${m.id}`,{method:'DELETE'}); loadMacros(); };
+        el.appendChild(d);
+      }
+    }catch(e){}
+  }
+  async function addMacro(){
+    $('serr').textContent='';
+    const body = { name:$('mname').value, method:$('mmethod').value, url:$('murl').value, extract:$('mextract').value, var:$('mvar').value };
+    if(!body.url || !body.extract || !body.var){ $('serr').textContent='url, extract and var required'; return; }
+    const r = await fetch('/api/v1/macros',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    if(r.ok){ $('mname').value=$('murl').value=$('mextract').value=$('mvar').value=''; loadMacros(); }
+    else { $('serr').textContent='failed to add macro'; }
+  }
+  function loadSession(){ loadVars(); loadMacros(); }
+
+  // ---------- Match & Replace ----------
+  async function loadRules(){
+    try{
+      const rules = await (await fetch('/api/v1/rules')).json();
+      const el = $('rlist');
+      el.innerHTML = rules.length ? '' : '<div class="ritem" style="opacity:.5">no rules yet</div>';
+      for(const r of rules){
+        const d = document.createElement('div');
+        d.className = 'ritem' + (r.enabled?'':' off');
+        d.innerHTML = `<span class="rtoggle" title="enable/disable">${r.enabled?'☑':'☐'}</span>`+
+          `<span class="rp">${esc(r.part)}</span>`+
+          `<span class="rx" title="${esc(r.pattern)} → ${esc(r.replace)}">${esc(r.pattern)} → ${esc(r.replace)}</span>`+
+          `<span class="rdel" title="delete">🗑</span>`;
+        d.querySelector('.rtoggle').onclick = async () => {
+          await fetch(`/api/v1/rules/${r.id}/toggle`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({on:!r.enabled})});
+          loadRules();
+        };
+        d.querySelector('.rdel').onclick = async () => { await fetch(`/api/v1/rules/${r.id}`,{method:'DELETE'}); loadRules(); };
+        el.appendChild(d);
+      }
+    }catch(e){}
+  }
+  async function addRule(){
+    $('rerr').textContent = '';
+    const body = { part: $('rpart').value, pattern: $('rpattern').value, replace: $('rreplace').value };
+    if(!body.pattern){ $('rerr').textContent = 'pattern required'; return; }
+    const r = await fetch('/api/v1/rules',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    if(r.ok){ $('rpattern').value=''; $('rreplace').value=''; loadRules(); }
+    else { const e = await r.json().catch(()=>({})); $('rerr').textContent = 'bad regex: '+(e.error||r.status); }
+  }
+
+  // ---------- Repeater (edit & send) ----------
+  function openRepeater(){
+    const f = state.detail; if(!f) return;
+    $('rpreq').value = reqToText(f.request);
+    $('rpresp').value = '';
+    $('repeater').classList.add('show');
+    $('rpreq').focus();
+  }
+  async function rpSend(){
+    const f = state.detail; if(!f) return;
+    const p = textToReq($('rpreq').value);
+    const url = flowUrl(f.request, p.path, p.query);
+    $('rpresp').value = 'sending…';
+    try{
+      const flow = await (await fetch('/api/v1/repeater',{method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({method:p.method, url, headers:p.headers, body:p.body})})).json();
+      const r = flow.response;
+      $('rpresp').value = r
+        ? `${r.http_version} ${r.status}\n`+(r.headers||[]).map(([k,v])=>`${k}: ${v}`).join('\n')+'\n\n'+b64dec(r.body||'')
+        : 'no response';
+    }catch(e){ $('rpresp').value = 'error: '+e.message; }
+  }
+
+  // ---------- Intruder ----------
+  function flowUrl(r, path, query){
+    const defp = (r.scheme==='https'&&r.port===443)||(r.scheme==='http'&&r.port===80);
+    const host = r.host.includes(':') && !r.host.startsWith('[') ? `[${r.host}]` : r.host;
+    const auth = defp ? host : `${host}:${r.port}`;
+    return `${r.scheme}://${auth}${path}${query?('?'+query):''}`;
+  }
+  function openIntruder(){
+    const f = state.detail; if(!f) return;
+    $('ireq').value = reqToText(f.request);
+    $('iresults').innerHTML = '<div class="irow">edit the request (add § markers), paste payloads, then Run</div>';
+    $('intruder').classList.add('show');
+  }
+  async function runIntruder(){
+    const f = state.detail; if(!f) return;
+    const p = textToReq($('ireq').value);
+    const url = flowUrl(f.request, p.path, p.query);
+    const payloads = $('ipayloads').value.split('\n').filter(s => s.length);
+    if(!payloads.length){ $('iresults').innerHTML = '<div class="irow">no payloads</div>'; return; }
+    const body = { base: { method:p.method, url, headers:p.headers, body:p.body },
+                   marker: $('imarker').value || '§', payloads,
+                   concurrency: parseInt($('iconc').value)||10 };
+    $('iresults').innerHTML = `<div class="irow">running ${payloads.length} payloads…</div>`;
+    try{
+      const r = await (await fetch('/api/v1/intruder',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
+      renderIntruderResults(r.results||[]);
+    }catch(e){ $('iresults').innerHTML = '<div class="irow">error: '+esc(e.message)+'</div>'; }
+  }
+  function renderIntruderResults(rows){
+    // sort by payload order preserved from server (unordered) -> keep as-is
+    let html = '<table><thead><tr><th>payload</th><th>status</th><th>length</th><th>ms</th></tr></thead><tbody>';
+    for(const r of rows){
+      const sc = r.status ? 's'+String(r.status)[0] : 's0';
+      html += `<tr><td>${esc(r.payload)}</td><td class="${sc}">${r.status??esc(r.error||'—')}</td>`+
+        `<td>${r.length??''}</td><td>${r.ms??''}</td></tr>`;
+    }
+    $('iresults').innerHTML = html + '</tbody></table>';
+  }
+
+  // ---------- Sitemap ----------
+  function buildSitemap(){
+    const hosts = new Map();
+    // group flows by host; per unique "METHOD path" keep the newest flow id + status
+    for(const {f} of state.flows.values()){
+      if(!hosts.has(f.host)) hosts.set(f.host, new Map());
+      const key = f.method + ' ' + f.path;
+      const cur = hosts.get(f.host).get(key);
+      if(!cur || f.id > cur.id) hosts.get(f.host).set(key, {id:f.id, method:f.method, path:f.path, status:f.status});
+    }
+    const el = $('maplist'); el.innerHTML = '';
+    if(hosts.size === 0){ el.innerHTML = '<div class="empty2">no traffic captured yet</div>'; return; }
+    for(const host of [...hosts.keys()].sort()){
+      const entries = [...hosts.get(host).values()].sort((a,b)=>a.path.localeCompare(b.path));
+      const grp = document.createElement('div');
+      const h = document.createElement('div'); h.className = 'host';
+      h.innerHTML = `▾ ${esc(host)} <span class="cnt">(${entries.length})</span>`;
+      h.onclick = () => { grp.classList.toggle('collapsed'); h.firstChild.textContent = grp.classList.contains('collapsed')?'▸ ':'▾ '; };
+      grp.appendChild(h);
+      for(const e of entries){
+        const sc = e.status ? 's'+String(e.status)[0] : 's0';
+        const leaf = document.createElement('div'); leaf.className = 'leaf';
+        leaf.innerHTML = `<span class="lm m m-${esc(e.method)}">${esc(e.method)}</span><span class="lp">${esc(e.path)}</span><span class="${sc}">${e.status||''}</span>`;
+        leaf.onclick = () => { $('sitemap').classList.remove('show'); select(e.id); };
+        grp.appendChild(leaf);
+      }
+      el.appendChild(grp);
+    }
+  }
+
+  // ---------- WebSocket messages ----------
+  function wsItemHtml(m){
+    const dir = m.direction==='send' ? '▲' : '▼';
+    return `<span class="dir ${esc(m.direction)}">${dir}</span>`+
+      `<span class="k">${esc(m.kind)}</span>`+
+      `<span class="h">${esc(m.host)}</span>`+
+      `<span class="d">${esc(m.data||'')}</span>`;
+  }
+  function addWs(m, prepend){
+    state.ws.push(m);
+    $('wsCount').textContent = state.ws.length ? state.ws.length : '';
+    const el = $('wslist'); if(el.querySelector('.empty2')) el.innerHTML='';
+    const d = document.createElement('div'); d.className='wsi'; d.innerHTML = wsItemHtml(m);
+    if(prepend) el.prepend(d); else el.appendChild(d);
+  }
+  async function loadWs(){
+    try{
+      const msgs = await (await fetch('/api/v1/ws')).json();
+      state.ws = []; $('wslist').innerHTML = msgs.length ? '' : '<div class="empty2">no WebSocket traffic yet</div>';
+      msgs.forEach(m => addWs(m, false));
+    }catch(e){}
+  }
+
+  // ---------- Comparer ----------
+  function runCompare(){
+    const a = $('ca').value.split('\n'), b = $('cb').value.split('\n');
+    const n = Math.max(a.length, b.length);
+    let diffCount = 0;
+    const paneA = document.createElement('div'), paneB = document.createElement('div');
+    paneA.className = 'cpane'; paneB.className = 'cpane';
+    for(let i=0;i<n;i++){
+      const la = a[i], lb = b[i], differ = la !== lb;
+      if(differ) diffCount++;
+      const cls = differ ? 'diff' : 'same';
+      paneA.innerHTML += `<span class="${cls}">${esc(la===undefined?'':la)||' '}</span>`;
+      paneB.innerHTML += `<span class="${cls}">${esc(lb===undefined?'':lb)||' '}</span>`;
+    }
+    const res = $('cresult'); res.innerHTML = ''; res.appendChild(paneA); res.appendChild(paneB);
+    $('cedit').style.display = 'none'; res.style.display = 'flex';
+    $('cbtn').textContent = 'Edit';
+    $('cdiff').textContent = `${diffCount} line${diffCount!==1?'s':''} differ · Δlen ${$('cb').value.length - $('ca').value.length}`;
+  }
+  function toggleCompare(){
+    if($('cresult').style.display !== 'none'){
+      $('cresult').style.display = 'none'; $('cedit').style.display = 'flex';
+      $('cbtn').textContent = 'Compare'; $('cdiff').textContent = '';
+    } else runCompare();
+  }
+
+  // ---------- Sequencer ----------
+  async function runSequencer(){
+    const tokens = $('seqin').value.split('\n').map(s=>s.trim()).filter(Boolean);
+    if(!tokens.length){ $('seqout').innerHTML = '<div class="row">paste some tokens first</div>'; return; }
+    $('seqout').innerHTML = '<div class="row">analysing…</div>';
+    try{
+      const d = await (await fetch('/api/v1/sequencer',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tokens})})).json();
+      const vclass = (d.verdict||'').split(' ')[0].split('—')[0].trim();
+      $('seqout').innerHTML =
+        `<div class="verdict ${vclass}">${esc(d.verdict)}</div>`+
+        `<div class="row"><b>${d.samples}</b> samples · <b>${d.unique}</b> unique · <b>${d.duplicates}</b> dupes · len <b>${d.min_len}–${d.max_len}</b> · charset <b>${d.charset_size}</b></div>`+
+        `<div class="row">avg position entropy <b>${d.avg_position_entropy_bits}</b> bits · total <b>${d.total_entropy_bits}</b> bits</div>`;
+    }catch(e){ $('seqout').innerHTML = '<div class="row">error: '+esc(e.message)+'</div>'; }
+  }
+
+  // ---------- Decoder ----------
+  const dec = {
+    b64e: s => btoa(unescape(encodeURIComponent(s))),
+    b64d: s => decodeURIComponent(escape(atob(s.replace(/-/g,'+').replace(/_/g,'/')))),
+    urle: s => encodeURIComponent(s),
+    urld: s => decodeURIComponent(s),
+    hexe: s => Array.from(new TextEncoder().encode(s)).map(b=>b.toString(16).padStart(2,'0')).join(''),
+    hexd: s => new TextDecoder().decode(new Uint8Array((s.replace(/[^0-9a-fA-F]/g,'').match(/.{1,2}/g)||[]).map(h=>parseInt(h,16)))),
+    jwt: s => { const p=s.trim().split('.'); const d=x=>JSON.stringify(JSON.parse(dec.b64d(x)),null,2);
+      return 'header:\n'+d(p[0])+'\n\npayload:\n'+d(p[1]); },
+  };
+  function runDecoder(op){
+    try{ $('decOut').value = dec[op]($('decIn').value); }
+    catch(e){ $('decOut').value = 'error: '+e.message; }
+  }
+
+  // ---------- Active scan ----------
+  async function activeScan(id){
+    const btn = $('activescan'); if(btn){ btn.disabled = true; btn.textContent = '🛡 scanning…'; }
+    try{
+      const r = await (await fetch('/api/v1/scan/active',{method:'POST',
+        headers:{'Content-Type':'application/json'}, body: JSON.stringify({from_flow:id})})).json();
+      const hits = (r.results||[]).filter(x => x.hit).length;
+      $('findings').classList.add('show'); loadFindings();
+      if(btn){ btn.textContent = hits ? `🛡 ${hits} hit${hits>1?'s':''}` : '🛡 clean'; }
+    }catch(e){ if(btn) btn.textContent = '🛡 error'; }
+    if(btn) setTimeout(()=>{ btn.disabled=false; btn.textContent='🛡 Scan'; }, 2500);
+  }
+
+  // ---------- Findings (passive scan) ----------
+  function fitemHtml(f){
+    return `<span class="sev sev-${esc(f.severity)}">${esc(f.severity.toUpperCase())}</span>`+
+      `<b>${esc(f.title)}</b> <span class="fh">— ${esc(f.host)}</span>`+
+      `<div class="fd">${esc(f.detail||'')}</div>`;
+  }
+  function addFinding(f, prepend){
+    state.findings.push(f);
+    $('findCount').textContent = state.findings.length ? state.findings.length : '';
+    const el = $('flist');
+    if(el.querySelector('.empty2')) el.innerHTML = '';
+    const d = document.createElement('div'); d.className = 'fitem'; d.innerHTML = fitemHtml(f);
+    if(prepend) el.prepend(d); else el.appendChild(d);
+  }
+  async function loadFindings(){
+    try{
+      const r = await (await fetch('/api/v1/findings')).json();
+      state.findings = [];
+      $('flist').innerHTML = (r.findings||[]).length ? '' : '<div class="empty2">no findings yet — browse through the proxy</div>';
+      (r.findings||[]).forEach(f => addFinding(f, false));
+    }catch(e){}
+  }
+
+  // ---------- Team: live config reload + presence ----------
+  function onConfigChanged(kind){
+    // Reload a panel only if it's currently open (another operator changed it).
+    if(kind==='rules' && $('rules').classList.contains('show')) loadRules();
+    if((kind==='vars'||kind==='macros') && $('session').classList.contains('show')) loadSession();
+    if(kind==='annotations'){
+      loadAnnotations();
+      if($('writeup').classList.contains('show')) loadWriteup();
+    }
+    if(kind==='scope'){
+      fetch('/api/v1/intercept').then(r=>r.json()).then(s=>{ $('scope').value=(s.scope||[]).join(', '); }).catch(()=>{});
+    }
+  }
+  async function loadOperators(){
+    try{
+      const ops = await (await fetch('/api/v1/operators')).json();
+      $('ops').textContent = ops.length ? ('👤 ' + ops.join(', ')) : '';
+    }catch(e){ $('ops').textContent = ''; }
+  }
+  function flashOps(msg){
+    const el = $('ops'); const prev = el.textContent;
+    el.textContent = '👤 ' + msg; setTimeout(loadOperators, 2500);
+  }
+
+  // ---------- SSE ----------
+  function connect(){
+    const es = new EventSource('/api/v1/stream' + (authToken ? ('?token=' + encodeURIComponent(authToken)) : ''));
+    es.onopen = () => dot.classList.add('on');
+    es.onerror = () => dot.classList.remove('on');
+    es.onmessage = ev => {
+      let m; try{ m=JSON.parse(ev.data); }catch(e){ return; }
+      if(m.event==='flow_new') upsert(m.summary, true);
+      else if(m.event==='flow_update') upsert(m.summary, false);
+      else if(m.event==='activity') onActivity(m.activity);
+      else if(m.event==='finding') addFinding(m.finding, true);
+      else if(m.event==='ws_message') addWs(m.msg, true);
+      else if(m.event==='config_changed') onConfigChanged(m.kind);
+      else if(m.event==='presence'){ loadOperators(); if(m.status==='join') flashOps(m.operator+' joined'); }
+      else if(m.event==='intercept_paused'){ state.held.push({id:m.id, kind:'req', data:m.request}); renderIntercept(); }
+      else if(m.event==='intercept_resp_paused'){ state.held.push({id:m.id, kind:'resp', data:m.response}); renderIntercept(); }
+      else if(m.event==='intercept_resolved'){ state.held = state.held.filter(h=>h.id!==m.id); renderIntercept(); }
+      else if(m.event==='intercept_state'){
+        setInterceptState(m.on, m.responses);
+        if(!m.on) state.held = state.held.filter(h=>h.kind!=='req');
+        if(!m.responses) state.held = state.held.filter(h=>h.kind!=='resp');
+        renderIntercept();
+      }
+    };
+  }
+
+  // ---------- initial load ----------
+  async function initial(){
+    try{
+      const r = await fetch('/api/v1/flows?limit=300'); const list = await r.json();
+      list.reverse().forEach(f => upsert(f, false)); // oldest first so newest ends on top
+    }catch(e){}
+    try{
+      const s = await (await fetch('/api/v1/intercept')).json();
+      setInterceptState(!!s.on, !!s.responses);
+      $('scope').value = (s.scope||[]).join(', ');
+      state.held = [
+        ...(s.queue||[]).map(q => ({id:q.id, kind:'req', data:q.request})),
+        ...(s.resp_queue||[]).map(q => ({id:q.id, kind:'resp', data:q.response})),
+      ];
+      renderIntercept();
+    }catch(e){}
+    loadFindings();
+    loadWs();
+    loadAnnotations();
+  }
+
+  // ---------- controls ----------
+  $('filter').addEventListener('input', e => {
+    state.query = parseQuery(e.target.value);
+    state.flows.forEach(({f,el}) => el.style.display = matches(f)?'':'none');
+  });
+  $('btnAuto').onclick = e => { state.auto=!state.auto; e.target.classList.toggle('active',state.auto); };
+  $('btnClear').onclick = () => { rows.innerHTML=''; state.flows.clear(); state.order=[]; countEl.textContent=0; };
+  $('btnNotify').onclick = async e => {
+    if(!('Notification' in window)){ e.target.textContent='🔔 unsupported'; return; }
+    if(Notification.permission!=='granted') await Notification.requestPermission();
+    state.notify = Notification.permission==='granted';
+    e.target.textContent = state.notify ? '🔔 Popups: on' : '🔔 blocked';
+    e.target.classList.toggle('active', state.notify);
+  };
+  $('btnIntercept').onclick = () => postToggle({ on: !state.intercept });
+  $('btnInterceptResp').onclick = () => postToggle({ responses: !state.interceptResp });
+  $('scope').addEventListener('change', async e => {
+    const hosts = e.target.value.split(',').map(s => s.trim()).filter(Boolean);
+    await fetch('/api/v1/intercept/scope',
+      {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ hosts })});
+  });
+  $('iforward').onclick = () => iresolve('forward');
+  $('idrop').onclick = () => iresolve('drop');
+  // Ctrl/Cmd+Enter = forward the held request quickly
+  $('iedit').addEventListener('keydown', e => {
+    if((e.ctrlKey||e.metaKey) && e.key==='Enter'){ e.preventDefault(); iresolve('forward'); }
+  });
+  $('btnRules').onclick = () => { $('rules').classList.add('show'); loadRules(); };
+  $('rulesClose').onclick = () => $('rules').classList.remove('show');
+  $('btnSession').onclick = () => { $('session').classList.add('show'); loadSession(); };
+  $('sessClose').onclick = () => $('session').classList.remove('show');
+  $('vaddbtn').onclick = setVar;
+  $('vval').addEventListener('keydown', e => { if(e.key==='Enter') setVar(); });
+  $('maddbtn').onclick = addMacro;
+  $('rpsend').onclick = rpSend;
+  $('rpClose').onclick = () => $('repeater').classList.remove('show');
+  $('rpreq').addEventListener('keydown', e => { if((e.ctrlKey||e.metaKey)&&e.key==='Enter'){ e.preventDefault(); rpSend(); }});
+  $('irun').onclick = runIntruder;
+  $('intruderClose').onclick = () => $('intruder').classList.remove('show');
+  $('btnMap').onclick = () => { $('sitemap').classList.add('show'); buildSitemap(); };
+  $('mapClose').onclick = () => $('sitemap').classList.remove('show');
+  $('mapRefresh').onclick = buildSitemap;
+  $('btnWs').onclick = () => { $('wsmsgs').classList.add('show'); loadWs(); };
+  $('wsClose').onclick = () => $('wsmsgs').classList.remove('show');
+  $('wsClear').onclick = async () => { await fetch('/api/v1/ws',{method:'POST'}); loadWs(); };
+  $('btnCompare').onclick = () => $('comparer').classList.add('show');
+  $('compClose').onclick = () => $('comparer').classList.remove('show');
+  $('cbtn').onclick = toggleCompare;
+  $('btnSeq').onclick = () => $('sequencer').classList.add('show');
+  $('seqClose').onclick = () => $('sequencer').classList.remove('show');
+  $('seqrun').onclick = runSequencer;
+  $('btnDecoder').onclick = () => $('decoder').classList.add('show');
+  $('decClose').onclick = () => $('decoder').classList.remove('show');
+  document.querySelectorAll('#decoder .dbtns button').forEach(b => b.onclick = () => runDecoder(b.dataset.op));
+  // Note editor
+  $('noteClose').onclick = () => $('note').classList.remove('show');
+  $('nsave').onclick = saveNote;
+  $('ndel').onclick = removeNote;
+  $('nlabel').addEventListener('keydown', e => { if((e.ctrlKey||e.metaKey)&&e.key==='Enter'){ e.preventDefault(); saveNote(); }});
+  document.querySelectorAll('#nswatches .sw').forEach(sw => sw.onclick = () => {
+    noteColor = sw.dataset.c || '';
+    document.querySelectorAll('#nswatches .sw').forEach(s => s.classList.toggle('sel', s===sw));
+  });
+  // Open embedded browser
+  $('btnBrowser').onclick = async () => {
+    const b = $('btnBrowser'); const t = b.textContent;
+    b.disabled = true; b.textContent = '🌐 opening…';
+    try{
+      const r = await fetch('/api/v1/browser/launch', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({})});
+      const d = await r.json();
+      b.textContent = d.ok ? ('🌐 '+d.browser) : '🌐 failed';
+    }catch(e){ b.textContent = '🌐 failed'; }
+    setTimeout(()=>{ b.textContent = t; b.disabled = false; }, 1600);
+  };
+  // Writeup panel
+  $('btnWriteup').onclick = () => { $('writeup').classList.add('show'); loadWriteup(); };
+  $('wuClose').onclick = () => $('writeup').classList.remove('show');
+  $('wuRefresh').onclick = loadWriteup;
+  $('wuRedact').onclick = loadWriteup;
+  $('wuHl').addEventListener('keydown', e => { if(e.key==='Enter') loadWriteup(); });
+  $('wuCopy').onclick = copyWriteup;
+  $('btnFindings').onclick = () => $('findings').classList.add('show');
+  $('findClose').onclick = () => $('findings').classList.remove('show');
+  $('findClear').onclick = async () => { await fetch('/api/v1/findings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({clear:true})}); loadFindings(); };
+  $('raddbtn').onclick = addRule;
+  $('rreplace').addEventListener('keydown', e => { if(e.key==='Enter') addRule(); });
+  $('ailogClose').onclick = () => $('ailog').classList.remove('show');
+  $('dTabs').addEventListener('click', e => {
+    if(e.target.tagName!=='BUTTON') return;
+    state.tab = e.target.dataset.t;
+    document.querySelectorAll('#dTabs button').forEach(b=>b.classList.toggle('active', b===e.target));
+    renderDetail();
+  });
+
+  // ---------- Boot (auth-gated) ----------
+  function start(){
+    $('btnLogout').style.display = authToken ? '' : 'none';
+    initial(); connect();
+    if(authToken){ loadOperators(); setInterval(loadOperators, 15000); } // team mode
+  }
+  async function doLogin(){
+    $('lerr').textContent = '';
+    try{
+      const r = await _fetch('/api/v1/team/join', {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ project_token: $('ltoken').value, display_name: $('lname').value })});
+      if(r.ok){
+        const d = await r.json();
+        if(d.session_token){ authToken = d.session_token; localStorage.setItem('bogbogprox_token', authToken);
+          $('login').classList.remove('show'); start(); return; }
+      }
+      $('lerr').textContent = 'invalid project token';
+    }catch(e){ $('lerr').textContent = 'error: ' + e.message; }
+  }
+  $('lbtn').onclick = doLogin;
+  $('lname').addEventListener('keydown', e => { if(e.key==='Enter') doLogin(); });
+  $('btnLogout').onclick = async () => {
+    try{ await fetch('/api/v1/team/logout',{method:'POST'}); }catch(e){}
+    authToken = null; localStorage.removeItem('bogbogprox_token'); location.reload();
+  };
+  async function boot(){
+    let who;
+    try{ who = await (await _fetch('/api/v1/team/whoami', authToken?{headers:{'Authorization':'Bearer '+authToken}}:{})).json(); }
+    catch(e){ who = { auth:false }; }
+    if(who.auth && !who.authenticated){
+      authToken = null; localStorage.removeItem('bogbogprox_token');
+      $('login').classList.add('show'); $('ltoken').focus();
+      return; // start() runs after successful join
+    }
+    start();
+  }
+  boot();
+})();
+</script>
+</body>
+</html>

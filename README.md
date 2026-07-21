@@ -1,4 +1,4 @@
-<h1 align="center">🪤 Snare</h1>
+<h1 align="center">🪤 BogBogProx</h1>
 
 <p align="center">
   <b>The Rust-native, AI-driven web security proxy.</b><br>
@@ -14,9 +14,9 @@
 
 ---
 
-## What is Snare?
+## What is BogBogProx?
 
-**Snare** is an open-source web application security proxy — a **Burp Suite alternative built in Rust from the core**, designed to be **faster, lighter, and smarter**, and open for everyone to extend.
+**BogBogProx** is an open-source web application security proxy — a **Burp Suite alternative built in Rust from the core**, designed to be **faster, lighter, and smarter**, and open for everyone to extend.
 
 One core, **three faces** from the same engine:
 
@@ -24,13 +24,13 @@ One core, **three faces** from the same engine:
 - 🌐 **Web** — open it in any browser, host it on a server
 - 🪟 **Desktop** — native app (Tauri), ~30–50 MB RAM, < 10 MB bundle
 
-And it's **AI-native**: Snare exposes its *entire* toolset over the **Model Context Protocol (MCP)**, so agents like Claude can drive it directly — from a simple "analyze this request" to an **autonomous, self-verifying pentester**.
+And it's **AI-native**: BogBogProx exposes its *entire* toolset over the **Model Context Protocol (MCP)**, so agents like Claude can drive it directly — from a simple "analyze this request" to an **autonomous, self-verifying pentester**.
 
 > **In one line:** *Burp's power with Rust's speed and an AI brain — lighter, faster, smarter, and open to everyone.*
 
-## Why Snare wins
+## Why BogBogProx wins
 
-| | Snare | Legacy proxies |
+| | BogBogProx | Legacy proxies |
 |---|---|---|
 | **AI-native** | Full toolset over MCP; autonomous agent loop | Bolt-on, closed, limited |
 | **Performance** | Rust/hyper · constant RAM over millions of flows · startup < 0.5s | JVM · heavy RAM · slow start |
@@ -52,16 +52,16 @@ the **[team-mode design](docs/design/team-mode.md)**, and the
 
 ```
   TUI (ratatui) ── Web (WASM) ── Desktop (Tauri)     ← thin frontends, no logic
-                       │  snare-client SDK
+                       │  bogbogprox-client SDK
                        ▼
-                   snared (daemon)  ── axum REST/WS · MCP (rmcp)
+                   bogbogproxd (daemon)  ── axum REST/WS · MCP (rmcp)
                        │
-                   snare-core  (library) ── capture · repeater · intruder · scanner
+                   bogbogprox-core  (library) ── capture · repeater · intruder · scanner
                        │                     rules · HTTPQL · AI orchestrator
         tokio (async I/O) ⇄ rayon (CPU-bound) + backpressure
         Storage port: SQLite WAL + blob  →  Postgres (team mode)
-        Engine  port: snare-engine (hudsucker / hyper / rustls)
-  [Browser / client] ─▶ snare-engine (data-plane) ─▶ [Target]
+        Engine  port: bogbogprox-engine (hudsucker / hyper / rustls)
+  [Browser / client] ─▶ bogbogprox-engine (data-plane) ─▶ [Target]
 ```
 
 ## Status
@@ -96,39 +96,39 @@ Replace, findings, and the decoder from its toolbar.
 
 ```bash
 cargo build
-./target/debug/snared ca generate          # unique per-install CA (§28)
+./target/debug/bogbogproxd ca generate          # unique per-install CA (§28)
 # install the printed cert in your browser/OS trust store, then:
-./target/debug/snared run                   # proxy :8888, REST API + dashboard :9000
+./target/debug/bogbogproxd run                   # proxy :8888, REST API + dashboard :9000
 # open the live dashboard in any browser:
 #   http://127.0.0.1:9000/
 # point your browser/curl at the proxy:
 curl --proxy http://127.0.0.1:8888 --cacert <ca.pem> https://example.com
-./target/debug/snared flows                 # list captured flows (CLI)
-./target/debug/snare-tui                     # or watch them live in the TUI (r = resend)
+./target/debug/bogbogproxd flows                 # list captured flows (CLI)
+./target/debug/bogbogprox-tui                     # or watch them live in the TUI (r = resend)
 # optional managed Chromium profile (removed after the browser closes):
-./target/debug/snared browser --url https://example.com
+./target/debug/bogbogproxd browser --url https://example.com
 ```
 
-Ports are overridable: `snared run --proxy 127.0.0.1:9999 --api 127.0.0.1:9001`.
+Ports are overridable: `bogbogproxd run --proxy 127.0.0.1:9999 --api 127.0.0.1:9001`.
 
 Three faces, one core — the same live dashboard, natively:
 
 ```bash
-./target/debug/snare-desktop     # native window (Tauri) onto the daemon dashboard
-# SNARE_URL=http://remote:9000/ ./target/debug/snare-desktop   # or a remote daemon
+./target/debug/bogbogprox-desktop     # native window (Tauri) onto the daemon dashboard
+# BOGBOGPROX_URL=http://remote:9000/ ./target/debug/bogbogprox-desktop   # or a remote daemon
 ```
 
-> **Desktop build prerequisites (Linux):** the `snare-desktop` crate needs the
+> **Desktop build prerequisites (Linux):** the `bogbogprox-desktop` crate needs the
 > Tauri/webkit system libraries:
 > `sudo apt install -y libwebkit2gtk-4.1-dev build-essential libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev libsoup-3.0-dev pkg-config`.
 > The other crates build without them.
 
-The `snare-mcp` binary is a stdio MCP server exposing `proxy_list_flows`,
+The `bogbogprox-mcp` binary is a stdio MCP server exposing `proxy_list_flows`,
 `proxy_get_flow`, `proxy_stats`, `repeater_send`, and `intruder_run` — point an
 MCP client (e.g. Claude) at it to drive the captured traffic. It reports each
 call to the daemon,
 so the dashboard shows, live, what the agent is doing.
-Set `SNARE_API=https://...` and `SNARE_TOKEN=<session-token>` for an authenticated
+Set `BOGBOGPROX_API=https://...` and `BOGBOGPROX_TOKEN=<session-token>` for an authenticated
 team server. The TUI supports the equivalent `--api` and `--token` flags.
 
 Captured bodies are bounded to 16 MiB in storage/UI. Larger bodies continue over
@@ -139,7 +139,7 @@ are rejected.
 
 | Phase | Delivers |
 |---|---|
-| **0 · Skeleton** | Cargo workspace, `snare-core` traits, empty `snared`, CI, gen-CA |
+| **0 · Skeleton** | Cargo workspace, `bogbogprox-core` traits, empty `bogbogproxd`, CI, gen-CA |
 | **1 · Core Loop** | Engine (hudsucker) + capture + SQLite + REST/WS + TUI + MCP (stdio) |
 | **2 · Attack + Web** | Intruder + Match&Replace + Decoder/Comparer + Sitemap + full HTTPQL + Web UI |
 | **3 · AI + Passive + Desktop** | MCP Streamable HTTP + AI tools + passive scanner + Desktop (Tauri) |
@@ -148,12 +148,12 @@ are rejected.
 
 ## Contributing
 
-Snare is an ambitious, open project — ideas, RFCs, and code are welcome once Phase 0 lands.
+BogBogProx is an ambitious, open project — ideas, RFCs, and code are welcome once Phase 0 lands.
 Architectural changes follow the ADR process documented in the design doc.
 
 ## License
 
-[Apache-2.0](LICENSE) © Snare contributors
+[Apache-2.0](LICENSE) © BogBogProx contributors
 
 ---
 

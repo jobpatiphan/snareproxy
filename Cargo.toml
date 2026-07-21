@@ -1,29 +1,29 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/snare-core",
-    "crates/snare-store-sqlite",
-    "crates/snare-store-postgres",
-    "crates/snare-engine",
-    "crates/snare-plugin",
-    "crates/snared",
-    "crates/snare-tui",
-    "crates/snare-mcp",
-    "crates/snare-desktop",
+    "crates/bogbogprox-core",
+    "crates/bogbogprox-store-sqlite",
+    "crates/bogbogprox-store-postgres",
+    "crates/bogbogprox-engine",
+    "crates/bogbogprox-plugin",
+    "crates/bogbogproxd",
+    "crates/bogbogprox-tui",
+    "crates/bogbogprox-mcp",
+    "crates/bogbogprox-desktop",
 ]
 
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
 license = "Apache-2.0"
-authors = ["Snare contributors"]
+authors = ["BogBogProx contributors"]
 repository = "https://github.com/jobpatiphan/bogbogprox"
 rust-version = "1.75"
 
 [workspace.dependencies]
-snare-core = { path = "crates/snare-core" }
-snare-store-sqlite = { path = "crates/snare-store-sqlite" }
-snare-engine = { path = "crates/snare-engine" }
+bogbogprox-core = { path = "crates/bogbogprox-core" }
+bogbogprox-store-sqlite = { path = "crates/bogbogprox-store-sqlite" }
+bogbogprox-engine = { path = "crates/bogbogprox-engine" }
 
 anyhow = "1"
 thiserror = "1"

@@ -13,7 +13,7 @@
 - **Attribution** — ทุก flow/finding/action ติดชื่อคนทำ.
 - **Presence** — ใครออนไลน์, กำลังดู flow ไหน.
 - **Auth** — เข้าร่วม server ของทีมได้เฉพาะคนที่ได้รับอนุญาต; traffic API/SSE เข้ารหัส (TLS).
-- **ไม่ทำลาย single-user local mode** — `snared run` (SQLite, ไม่มี auth) ต้องทำงานเหมือนเดิม.
+- **ไม่ทำลาย single-user local mode** — `bogbogproxd run` (SQLite, ไม่มี auth) ต้องทำงานเหมือนเดิม.
 
 **Non-goals (เฟสนี้)**
 - Offline-first / multi-master sync แบบ **CRDT** — ยังไม่ทำ (ดู §6, เปิดทางไว้แต่ deferred).
@@ -25,8 +25,8 @@
 
 ## 2. What we build on (existing architecture)
 
-- `snared` = daemon เดียว: proxy engine (hudsucker) + **`FlowStore` port** (ตอนนี้ SQLite) + coordinators ใน process (`Intercept`, `Rules`, `Scanner`, `Vars`, `Macros`, `WsLog`) + `broadcast::channel<FlowEvent>` → **SSE** `/api/v1/stream`.
-- Frontends (TUI/Web/Desktop) คุย snared ผ่าน **REST + SSE** เท่านั้น (thin clients).
+- `bogbogproxd` = daemon เดียว: proxy engine (hudsucker) + **`FlowStore` port** (ตอนนี้ SQLite) + coordinators ใน process (`Intercept`, `Rules`, `Scanner`, `Vars`, `Macros`, `WsLog`) + `broadcast::channel<FlowEvent>` → **SSE** `/api/v1/stream`.
+- Frontends (TUI/Web/Desktop) คุย bogbogproxd ผ่าน **REST + SSE** เท่านั้น (thin clients).
 - Config เก็บถาวรใน `config.json` (rules/scope/scanner/vars/macros).
 
 Team mode คือ **การสลับ backing store เป็น Postgres + เพิ่มชั้น auth/attribution/presence** บนโครงเดิม — ไม่ต้องแตะ UI เพราะ UI คุยผ่าน API ที่ port อยู่แล้ว (สอดคล้อง ADR 009 "local-first daemon + client SDK").
@@ -39,7 +39,7 @@ Team mode คือ **การสลับ backing store เป็น Postgres 
 
 | แบบ | อธิบาย | ข้อดี | ข้อเสีย |
 |---|---|---|---|
-| **A. Central proxy + central store** | มี `snared` ตัวเดียว (team server) รัน proxy + Postgres; ทุกคนตั้ง browser ชี้ team proxy + client ต่อ API เดียวกัน | reuse โค้ดเดิมเกือบ 100% (แค่ SQLite→Postgres + auth) | traffic ทุกคนผ่าน host เดียว, ต้องแชร์ CA, privacy/coupling สูง |
+| **A. Central proxy + central store** | มี `bogbogproxd` ตัวเดียว (team server) รัน proxy + Postgres; ทุกคนตั้ง browser ชี้ team proxy + client ต่อ API เดียวกัน | reuse โค้ดเดิมเกือบ 100% (แค่ SQLite→Postgres + auth) | traffic ทุกคนผ่าน host เดียว, ต้องแชร์ CA, privacy/coupling สูง |
 | **B. Local proxy + central collab store** | แต่ละคนรัน proxy engine ในเครื่องตัวเอง แต่ push flow/finding + subscribe event ไปที่ **collab server** กลาง (Postgres) | isolation ดี, capture เป็น local (latency ต่ำ), ต่างคนต่าง CA | ต้องมีชั้น sync (client→server push), โค้ดเพิ่ม |
 | C. Peer-to-peer | ไม่มี server กลาง, sync ตรงระหว่าง peer | ไม่ต้องมี infra กลาง | consistency/discovery ยาก, เกินความจำเป็น |
 
@@ -48,9 +48,9 @@ Team mode คือ **การสลับ backing store เป็น Postgres 
 
 ```
         MVP (A):                              Target (B):
-  [op1 browser]─┐                      [op1 local snared]─push─┐
-  [op2 browser]─┼─▶ team snared ──▶ PG   [op2 local snared]─push─┼─▶ collab server ──▶ PG
-  [op3 browser]─┘   (proxy+api+sse)       [op3 local snared]─push─┘   (api+sse+auth)
+  [op1 browser]─┐                      [op1 local bogbogproxd]─push─┐
+  [op2 browser]─┼─▶ team bogbogproxd ──▶ PG   [op2 local bogbogproxd]─push─┼─▶ collab server ──▶ PG
+  [op3 browser]─┘   (proxy+api+sse)       [op3 local bogbogproxd]─push─┘   (api+sse+auth)
         clients ◀── SSE ──┘                     clients ◀── SSE ──────────┘
 ```
 
@@ -58,7 +58,7 @@ Team mode คือ **การสลับ backing store เป็น Postgres 
 
 ## 4. Storage: SQLite → Postgres
 
-เรามี **`FlowStore` trait (storage port)** อยู่แล้ว → team mode = เพิ่ม crate **`snare-store-postgres`** (sqlx) impl trait เดิม.
+เรามี **`FlowStore` trait (storage port)** อยู่แล้ว → team mode = เพิ่ม crate **`bogbogprox-store-postgres`** (sqlx) impl trait เดิม.
 
 **สิ่งที่ append-only (ง่าย, ไม่มี conflict):** flows, responses/blobs, findings, ws_messages, activity.
 **สิ่งที่ mutable ร่วมกัน (ต้องมีกลยุทธ์, §6):** rules, scope, vars, macros, scanner toggle.
@@ -132,7 +132,7 @@ Config ที่แก้ร่วมกัน (rules/scope/vars/macros) — เ
 
 - **MVP:** join ด้วย **project bearer token** (แชร์กันในทีม) + operator ใส่ **display name**. Server ออก per-operator session token (JWT/opaque) หลัง join.
 - API/SSE middleware: axum layer ตรวจ `Authorization: Bearer` ทุก request (ยกเว้น health). Local mode = ปิด auth (backward-compat).
-- **TLS:** team server ต้องรันหลัง TLS. เพิ่ม `snared serve --tls-cert --tls-key` หรือให้อยู่หลัง reverse proxy (nginx/caddy). CA ของ MITM ≠ TLS cert ของ API (คนละอัน).
+- **TLS:** team server ต้องรันหลัง TLS. เพิ่ม `bogbogproxd serve --tls-cert --tls-key` หรือให้อยู่หลัง reverse proxy (nginx/caddy). CA ของ MITM ≠ TLS cert ของ API (คนละอัน).
 - **Attribution:** operator id ฝังใน request context → เขียนลง `flows.operator_id`, `findings.operator_id`, `activity.agent/operator`. `Source` enum อาจเพิ่ม operator แยก field (ไม่ทับ proxy/repeater/intruder/scanner).
 - **Later:** per-operator accounts, roles (viewer/editor/admin), audit log, SSO.
 
@@ -181,7 +181,7 @@ Local mode: endpoint `team/*` ปิด, ไม่มี auth — โค้ด p
 
 | เฟส | สิ่งที่ทำ | Done เมื่อ |
 |---|---|---|
-| **T1 · Postgres store** | crate `snare-store-postgres` (sqlx) impl `FlowStore`; `snared serve --postgres <url>`; flows/findings/ws append-only แชร์ + fan-out SSE เดิม | 2 คน browse ผ่าน team proxy เห็น flow ของกันสด |
+| **T1 · Postgres store** | crate `bogbogprox-store-postgres` (sqlx) impl `FlowStore`; `bogbogproxd serve --postgres <url>`; flows/findings/ws append-only แชร์ + fan-out SSE เดิม | 2 คน browse ผ่าน team proxy เห็น flow ของกันสด |
 | **T2 · Auth + identity** | project token join, per-session token, axum auth layer, TLS flag, operator attribution บน flow/finding/activity | เข้าได้เฉพาะคนมี token, flow ติดชื่อคนจับ |
 | **T3 · Shared config** | `SettingsStore` port → Postgres; rules/scope/vars/macros/scanner ใน PG + change events + client reload; optimistic version (409) | คนหนึ่งเพิ่ม rule คนอื่นเห็นทันที |
 | **T4 · Presence** | presence event + heartbeat + operator list; Web avatars | เห็นใครออนไลน์/ดู flow ไหน |
@@ -194,7 +194,7 @@ Local mode: endpoint `team/*` ปิด, ไม่มี auth — โค้ด p
 
 ## 12. Data model / code changes summary
 
-- **ใหม่:** `snare-store-postgres` crate; `SettingsStore` port; `Presence`/operator ใน `FlowEvent`; auth middleware ใน `snared/api`; `serve` subcommand.
+- **ใหม่:** `bogbogprox-store-postgres` crate; `SettingsStore` port; `Presence`/operator ใน `FlowEvent`; auth middleware ใน `bogbogproxd/api`; `serve` subcommand.
 - **แก้:** `flows`/`findings`/`activity` เพิ่ม `operator`; rules/macros id → **UUID + version**; coordinators โหลด/เซฟผ่าน `SettingsStore` แทน `config.json` โดยตรง (local = file adapter, team = PG adapter).
 - **ไม่แตะ:** engine data-plane, frontends (คุยผ่าน API เดิม), intercept/repeater/intruder/scanner logic.
 
@@ -227,4 +227,4 @@ Local mode: endpoint `team/*` ปิด, ไม่มี auth — โค้ด p
 
 ## 15. Next step
 
-เริ่ม **T1**: สร้าง `snare-store-postgres` (impl `FlowStore` ด้วย sqlx), schema flows/bodies/findings/ws, และ `snared serve --postgres <url>` — จุดที่ reuse สูงสุดและเห็นผล (2 คน browse เห็นกันสด) เร็วที่สุด. หลัง T1 ค่อยตัดสิน central-vs-local เป็น default จากการใช้จริง.
+เริ่ม **T1**: สร้าง `bogbogprox-store-postgres` (impl `FlowStore` ด้วย sqlx), schema flows/bodies/findings/ws, และ `bogbogproxd serve --postgres <url>` — จุดที่ reuse สูงสุดและเห็นผล (2 คน browse เห็นกันสด) เร็วที่สุด. หลัง T1 ค่อยตัดสิน central-vs-local เป็น default จากการใช้จริง.

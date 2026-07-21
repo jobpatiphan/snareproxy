@@ -1,4 +1,4 @@
-# Example Snare plugin — compiles to a WASM component.
+# Example BogBogProx plugin — compiles to a WASM component.
 # Build: cargo build --release --target wasm32-wasip2
 # Detached from the host workspace (different target/crate-type).
 [workspace]

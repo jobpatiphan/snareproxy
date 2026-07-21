@@ -1,0 +1,19 @@
+[package]
+name = "bogbogprox-engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+bogbogprox-core.workspace = true
+bogbogprox-plugin = { path = "../bogbogprox-plugin" }
+anyhow.workspace = true
+tracing.workspace = true
+tokio.workspace = true
+hudsucker = "0.23"
+rcgen = { version = "0.13", features = ["pem"] }
+http-body-util = "0.1"
+hyper = "1"
+bytes = "1"
+futures = "0.3"

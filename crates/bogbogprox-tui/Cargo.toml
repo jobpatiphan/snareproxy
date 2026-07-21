@@ -1,0 +1,20 @@
+[package]
+name = "bogbogprox-tui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "bogbogprox-tui"
+path = "src/main.rs"
+
+[dependencies]
+bogbogprox-core.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+clap.workspace = true
+ratatui = "0.28"
+crossterm = "0.28"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
