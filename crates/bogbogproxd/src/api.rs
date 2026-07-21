@@ -113,6 +113,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/repeater", post(repeater_custom))
         .route("/api/v1/repeater/from/:id", post(repeater_from))
         .route("/api/v1/access/from/:id", post(access_from))
+        .route("/api/v1/replay/rebase", post(replay_rebase))
         .route(
             "/api/v1/intercept",
             get(intercept_get).post(intercept_toggle),
@@ -520,6 +521,82 @@ async fn access_from(
         "broken": both_ok && len_similar,
     }))
     .into_response()
+}
+
+#[derive(Debug, Deserialize)]
+pub struct Rebase {
+    /// Flow ids to replay, in order.
+    pub flows: Vec<i64>,
+    /// New authority to point them at — "host" or "host:port".
+    pub to_host: String,
+}
+
+/// Replay a saved request chain against a new target — re-solve an identical
+/// app on a fresh instance by rebasing the captured exploit flows onto a new
+/// host. Keeps method/path/query/headers/body; swaps the authority + Host header.
+async fn replay_rebase(State(st): State<AppState>, Json(b): Json<Rebase>) -> Response {
+    let to_host = b.to_host.trim();
+    if to_host.is_empty() {
+        return (StatusCode::BAD_REQUEST, Json(json!({ "error": "to_host is empty" })))
+            .into_response();
+    }
+    let host_only = to_host.split(':').next().unwrap_or(to_host).to_string();
+
+    let mut results = Vec::new();
+    for id in &b.flows {
+        let flow = match st.store.get_flow(*id) {
+            Ok(Some(f)) => f,
+            _ => {
+                results.push(json!({ "from": id, "error": "not found" }));
+                continue;
+            }
+        };
+        let r = &flow.request;
+        if r.body_truncated {
+            results.push(json!({ "from": id, "error": "body truncated" }));
+            continue;
+        }
+        let pq = match &r.query {
+            Some(q) if !q.is_empty() => format!("{}?{}", r.path, q),
+            _ => r.path.clone(),
+        };
+        let new_url = format!("{}://{}{}", r.scheme, to_host, pq);
+        // Point the Host header at the new authority; keep everything else.
+        let mut headers: Vec<Header> = r
+            .headers
+            .iter()
+            .map(|(k, v)| {
+                if k.eq_ignore_ascii_case("host") {
+                    (k.clone(), host_only.clone())
+                } else {
+                    (k.clone(), v.clone())
+                }
+            })
+            .collect();
+        if !headers.iter().any(|(k, _)| k.eq_ignore_ascii_case("host")) {
+            headers.push(("Host".into(), host_only.clone()));
+        }
+        match repeater::send(
+            &st.store,
+            &st.events,
+            bogbogprox_core::model::Source::Repeater,
+            &r.method,
+            &new_url,
+            &headers,
+            r.body.clone(),
+        )
+        .await
+        {
+            Ok(alt) => results.push(json!({
+                "from": id,
+                "to_flow": alt.id,
+                "status": alt.response.as_ref().map(|x| x.status),
+                "url": new_url,
+            })),
+            Err(e) => results.push(json!({ "from": id, "error": e.to_string() })),
+        }
+    }
+    Json(json!({ "rebased": results.len(), "results": results })).into_response()
 }
 
 // ---- Interactive intercept (§5.1) ----

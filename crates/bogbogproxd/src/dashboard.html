@@ -586,6 +586,8 @@
       <span>highlight:</span><input type="text" id="wuHl" placeholder="global payload (optional)" spellcheck="false">
       <label><input type="checkbox" id="wuRedact" checked> redact secrets</label>
       <button id="wuRefresh">↻ Refresh</button>
+      <span style="margin-left:10px">rebase→</span><input type="text" id="wuHost" placeholder="new host (inst-XXXX.aegis-ctf.com)" style="width:230px" spellcheck="false">
+      <button id="wuRebase" title="Replay the annotated flows against a new host">🔁 Rebase</button>
       <span class="grow"></span>
       <button id="wuCopy">⧉ Copy Markdown</button>
     </div>
@@ -1730,6 +1732,21 @@ Import-Certificate -FilePath bogbogprox-ca.pem `
   $('wuClose').onclick = () => $('writeup').classList.remove('show');
   $('wuRefresh').onclick = loadWriteup;
   $('wuRedact').onclick = loadWriteup;
+  $('wuRebase').onclick = async () => {
+    const host = $('wuHost').value.trim(); if(!host) return;
+    const b=$('wuRebase'); b.disabled=true; b.textContent='🔁 …';
+    try{
+      const anns = await (await fetch('/api/v1/annotations')).json();
+      const flows = anns.filter(a=>a.include!==false).map(a=>a.flow_id);
+      if(!flows.length){ b.textContent='no flows'; }
+      else{
+        const r = await (await fetch('/api/v1/replay/rebase',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({flows,to_host:host})})).json();
+        const ok = r.results.filter(x=>x.status&&x.status<400).length;
+        b.textContent=`✓ ${ok}/${r.rebased} ok`;
+      }
+    }catch(e){ b.textContent='failed'; }
+    setTimeout(()=>{ b.textContent='🔁 Rebase'; b.disabled=false; }, 2500);
+  };
   $('wuHl').addEventListener('keydown', e => { if(e.key==='Enter') loadWriteup(); });
   $('wuCopy').onclick = copyWriteup;
   $('btnFindings').onclick = () => $('findings').classList.add('show');
